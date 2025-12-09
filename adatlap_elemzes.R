@@ -13,7 +13,7 @@ read_data <- function(filepath, column_names) {
   return(df)
 }
 
-data <- read_data(
+interview_data <- read_data(
   "Adatlapok - kvótakövetés - Adatlap.csv",
   c(
     "id", "interviewer1", "interviewer2", "birth_year", "gender", "education", "housing_type",
@@ -31,21 +31,21 @@ clean_currency <- function(x) {
   as.integer(ifelse(x_clean == "" | is.na(x_clean), NA, x_clean))
 }
 
-data[currency_cols] <- lapply(data[currency_cols], clean_currency)
+interview_data[currency_cols] <- lapply(interview_data[currency_cols], clean_currency)
 currency_cols <- c("housing_expenses_total", "utilities_cost", "rent_cost", "mortgage_cost", "total_income")
-data[currency_cols] <- lapply(data[currency_cols], clean_currency)
+interview_data[currency_cols] <- lapply(interview_data[currency_cols], clean_currency)
 
 
 # Load tarsashazak separately if needed
 tarsashazak <- read.csv("tarsashaztipologia.csv", header = TRUE, stringsAsFactors = FALSE)
-data <- data %>%
+interview_data <- interview_data %>%
   left_join(
     tarsashazak %>% select(cím, elhelyezkedés),
     by = c("address" = "cím")
   )
 
 # Convert factors
-data <- data %>%
+interview_data <- interview_data %>%
   mutate(
     gender = factor(gender),
     education = factor(education, levels = c(
@@ -93,9 +93,9 @@ data <- data %>%
     ))
   )
 
-data$housing_expenses_PP <- data$housing_expenses_total / data$household_size
+interview_data$housing_expenses_PP <- interview_data$housing_expenses_total / interview_data$household_size
 
-data <- data %>%
+interview_data <- interview_data %>%
   mutate(
     category = case_when(
       birth_year < 1965 ~ "idős",
@@ -106,9 +106,9 @@ data <- data %>%
   )
 
 # Quick check
-table(data$category)
+table(interview_data$category)
 
-data <- data %>%
+interview_data <- interview_data %>%
   mutate(
     category_A = case_when(
       birth_year < 1965 ~ "idős",
@@ -118,8 +118,8 @@ data <- data %>%
     category_A = factor(category_A, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
   )
 
-table(data$category_A)
-data <- data %>%
+table(interview_data$category_A)
+interview_data <- interview_data %>%
   mutate(
     category_B = case_when(
       birth_year < 1965 ~ "idős",
@@ -129,8 +129,8 @@ data <- data %>%
     category_B = factor(category_B, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
   )
 
-table(data$category_B)
-data <- data %>%
+table(interview_data$category_B)
+interview_data <- interview_data %>%
   mutate(
     category_C = case_when(
       birth_year < 1965 ~ "idős",
@@ -140,15 +140,15 @@ data <- data %>%
     category_C = factor(category_C, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
   )
 
-table(data$category_C)
+table(interview_data$category_C)
 
 
-# --- Save the cleaned and processed data ---
-save(data, file = "socio_demo_data.RData")
+# --- Save the cleaned and processed interview_data ---
+save(interview_data, file = "interview_data.RData")
 
 
 # --- 3. Numeric Analysis ---
-numeric_vars <- data %>%
+numeric_vars <- interview_data %>%
   select(birth_year, household_size, num_children, apartment_size,
          housing_expenses_total, mortgage_cost, total_income, floor)
 
@@ -183,11 +183,11 @@ plot_scatter_matrix <- function(df, numeric_cols, color_var) {
   par(op)
 }
 
-plot_scatter_matrix(data, names(numeric_vars), "lakhatasi_szegeny")
+plot_scatter_matrix(interview_data, names(numeric_vars), "lakhatasi_szegeny")
 
 # --- 5. ggplot Visualizations ---
 plot_numeric_vs <- function(x, y, color, title, palette = NULL) {
-  p <- ggplot(data, aes_string(x = x, y = y, color = color)) +
+  p <- ggplot(interview_data, aes_string(x = x, y = y, color = color)) +
     geom_point(alpha = 0.7, size = 4) +
     theme_minimal() +
     labs(title = title, x = x, y = y)
@@ -239,20 +239,20 @@ plot_stacked_bar <- function(df, x, fill, title, y_label = "Proportion (%)", pal
 }
 
 # Expense coverage by housing overburden
-plot_stacked_bar(data, "expense_coverage", "lakhatasi_szegeny",
+plot_stacked_bar(interview_data, "expense_coverage", "lakhatasi_szegeny",
                  "Lakhatási szegénység megoszlása a megélhetés nehézsége szerint",
                  palette = c("blue", "red"))
 
-plot_stacked_bar(data, "education_aggr", "housing_type", "Housing Type Distribution by Education Level")
+plot_stacked_bar(interview_data, "education_aggr", "housing_type", "Housing Type Distribution by Education Level")
 
 
 # Education by expense coverage with color ramp
-expense_levels <- levels(data$expense_coverage)
+expense_levels <- levels(interview_data$expense_coverage)
 colors <- ifelse(expense_levels == "Nem tudja", "grey",
                  colorRampPalette(c("red", "green"))(length(expense_levels) - 1))
 names(colors) <- expense_levels
 
-plot_stacked_bar(data, "education_aggr", "expense_coverage",
+plot_stacked_bar(interview_data, "education_aggr", "expense_coverage",
                  "Expense Coverage by Education Level",
                  palette = colors)
 
@@ -260,7 +260,7 @@ plot_stacked_bar(data, "education_aggr", "expense_coverage",
 # elhelyezkedés elemzés
 
 # --- 1. Create age groups ---
-data <- data %>%
+interview_data <- interview_data %>%
   mutate(age = 2025 - birth_year,  # replace 2025 with the current year if needed
          age_group = cut(age,
                          breaks = c(-Inf, 29, 49, 64, Inf),
@@ -268,15 +268,15 @@ data <- data %>%
 
 # --- 2. Stacked barplots by elhelyezkedés ---
 # Education by elhelyezkedés
-plot_stacked_bar(data, "elhelyezkedés", "education_aggr", "Education Level by elhelyezkedés")
+plot_stacked_bar(interview_data, "elhelyezkedés", "education_aggr", "Education Level by elhelyezkedés")
 
 # Expense coverage by elhelyezkedés
-expense_levels <- levels(data$expense_coverage)
+expense_levels <- levels(interview_data$expense_coverage)
 colors_exp <- ifelse(expense_levels == "Nem tudja", "grey",
                      colorRampPalette(c("red", "green"))(length(expense_levels) - 1))
 names(colors_exp) <- expense_levels
 
-plot_stacked_bar(data, "elhelyezkedés", "expense_coverage",
+plot_stacked_bar(interview_data, "elhelyezkedés", "expense_coverage",
                  "Expense Coverage by elhelyezkedés",
                  palette = colors_exp)
 
@@ -286,18 +286,18 @@ plot_stacked_bar(data, "elhelyezkedés", "expense_coverage",
 par(mar = c(10, 5, 4, 1))
 
 plot(
-  (data$income_per_person / 1000) ~ data$expense_coverage,
+  (interview_data$income_per_person / 1000) ~ interview_data$expense_coverage,
   xlab = "",
   ylab = "ezer forint per fő",
   xaxt = "n",
   main = "Egy főre jutó bevétel megélhetés nehézsége szerint"
 )
-axis(1, at = 1:length(levels(data$expense_coverage)), labels = levels(data$expense_coverage), las = 2)
+axis(1, at = 1:length(levels(interview_data$expense_coverage)), labels = levels(interview_data$expense_coverage), las = 2)
 
-counts <- table(data$expense_coverage)
-y_values <- tapply(data$income_per_person / 1000, data$expense_coverage, mean, na.rm = T)
+counts <- table(interview_data$expense_coverage)
+y_values <- tapply(interview_data$income_per_person / 1000, interview_data$expense_coverage, mean, na.rm = T)
 text(
-  x = 1:length(levels(data$expense_coverage)) + 0.2,
+  x = 1:length(levels(interview_data$expense_coverage)) + 0.2,
   y = 700,
   labels = counts,
   col = "red",
@@ -309,18 +309,18 @@ text(x = 0.8, y = 700, "n =", col = "red", pos = 3)
 
 
 # Housing type by elhelyezkedés
-plot_stacked_bar(data, "elhelyezkedés", "housing_type", "Housing Type by elhelyezkedés")
+plot_stacked_bar(interview_data, "elhelyezkedés", "housing_type", "Housing Type by elhelyezkedés")
 
 # Age group by elhelyezkedés
 age_colors <- c("<30" = "#F8766D", "30-49" = "#7CAE00", "50-64" = "#00BFC4", "65+" = "#C77CFF")
 
-plot_stacked_bar(data, "elhelyezkedés", "age_group", "Age Groups by elhelyezkedés", palette = age_colors)
+plot_stacked_bar(interview_data, "elhelyezkedés", "age_group", "Age Groups by elhelyezkedés", palette = age_colors)
 
 # Years in VIII district and in aparmtment
 plot(
   NA, NA,
-  xlim = range(data$years_in_district, na.rm = TRUE),
-  ylim = range(data$birth_year, na.rm = TRUE),
+  xlim = range(interview_data$years_in_district, na.rm = TRUE),
+  ylim = range(interview_data$birth_year, na.rm = TRUE),
   xlab = "Év",
   ylab = "Születési év",
   main = "Lakhatási történelem"
@@ -328,14 +328,14 @@ plot(
 abline(a = 0, b = 1, lty = 2, col = "darkgrey")
 text(1980, 1980, col="darkgrey", "Születése óta ott él →", pos = 2)
 points(
-  data$years_in_district,
-  data$birth_year,
+  interview_data$years_in_district,
+  interview_data$birth_year,
   pch = 16,
   col = "orange"
 )
 points(
-  data$years_in_apartment,
-  data$birth_year,
+  interview_data$years_in_apartment,
+  interview_data$birth_year,
   pch = 16,
   col = "darkgreen"
 )
@@ -352,8 +352,8 @@ legend(
 # Base plot
 plot(
   NA, NA,
-  xlim = range(data$years_in_district, data$years_in_apartment, na.rm = TRUE),
-  ylim = range(data$birth_year, na.rm = TRUE),
+  xlim = range(interview_data$years_in_district, interview_data$years_in_apartment, na.rm = TRUE),
+  ylim = range(interview_data$birth_year, na.rm = TRUE),
   xlab = "Év",
   ylab = "Születési év",
   main = "Lakhatási történelem"
@@ -362,12 +362,12 @@ plot(
 abline(a = 0, b = 1, lty = 2, col = "darkgrey")
 text(1980, 1980, col = "darkgrey", "Születése óta ott él →", pos = 2)
 
-# Loop through data to plot points/arrows
-for(i in seq_len(nrow(data))) {
-  x1 <- data$years_in_district[i]
-  x2 <- data$years_in_apartment[i]
-  y <- data$birth_year[i]
-  prev <- data$prev_district[i]
+# Loop through interview_data to plot points/arrows
+for(i in seq_len(nrow(interview_data))) {
+  x1 <- interview_data$years_in_district[i]
+  x2 <- interview_data$years_in_apartment[i]
+  y <- interview_data$birth_year[i]
+  prev <- interview_data$prev_district[i]
   
   if(is.na(x1) | is.na(x2) | is.na(y)) next  # skip missing values
   
