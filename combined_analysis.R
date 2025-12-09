@@ -1,6 +1,7 @@
 library(readxl)
 library(dplyr)
 library(tidyr)
+library(ggplot2)
 
 # Load interview-level metadata (contains IDs and attributes for each interview)
 load("interview_data.RData")
@@ -68,3 +69,85 @@ missing_in_quotations <- interview_data %>%
   distinct(id)
 
 missing_in_quotations  # should be empty
+
+
+# =======  ANALYSIS ==============
+
+compute_code_sentiment <- function(data, my_code, my_category) {
+  
+  # Step 1: Filter initial df
+  df <- data %>%
+    filter(code == my_code,
+           category == my_category)
+  
+  # Step 2: Find matching rows with different code
+  df_pos_neg <- data %>%
+    filter(codegroup == "Pozitív / Negatív") %>%
+    select(-codegroup)  # Remove codegroup to avoid duplication if needed
+  
+  # Step 3: Join with original df via quotation and other columns except code
+  # Assuming 'quotation' is the unique connecting key
+  df <- df %>%
+    left_join(df_pos_neg %>% select(quotation, code), 
+              by = "quotation", 
+              suffix = c("", "_posneg"))
+  
+  df_summary <- df %>%
+    # Keep only rows that matched with Pos/Neg
+    filter(!is.na(code_posneg)) %>%
+    group_by(document) %>%
+    summarise(
+      total_posneg = n(),  # total rows in Pos/Neg for this document
+      nr_pos = sum(code_posneg == "Pozitív"),  # count of Pos codes
+      share_pos = nr_pos / total_posneg   # share of Pos
+    )
+  print(df_summary)
+  share_positive <- mean(df_summary$share_pos, na.rm = T)
+  return (share_positive)
+}
+
+
+plot_code_sentiment_across_categories <- function(data, code_name) {
+  # Get all unique categories
+  categories <- unique(data$category)
+  
+  # Compute sentiment and counts for each category
+  sentiment_summary <- lapply(categories, function(cat) {
+    df <- data %>% filter(code == code_name, category == cat)
+    
+    # Compute positive sentiment
+    share_pos <- compute_code_sentiment(data, code_name, cat)
+    
+    # Count of quotations in this category for this code
+    n_rows <- nrow(df)
+    
+    return(data.frame(category = cat, share_pos = share_pos, n = n_rows))
+  }) %>%
+    bind_rows()
+  
+  # Basic barplot
+  barplot(
+    sentiment_summary$share_pos,
+    names.arg = sentiment_summary$category,
+    col = "skyblue",
+    border = "white",
+    ylim = c(0, 1),  # extra space for counts above bars
+    main = paste("Share of Positive Sentiment for Code:", code_name),
+    ylab = "Share Positive",
+    xlab = "Category"
+  )
+  
+
+  # Add n values 
+  text(
+    x = seq_along(sentiment_summary$share_pos),
+    y = sentiment_summary$share_pos,
+    labels = paste0("n=", sentiment_summary$n),
+    pos = 1,
+    cex = 0.8,
+    col = "black"
+  )
+}
+# Example usage
+#compute_code_sentiment(quotations, "Biztonságérzet", "fiatal_bérlő")
+plot_code_sentiment_across_categories(quotations, "Blaha Lujza tér")
