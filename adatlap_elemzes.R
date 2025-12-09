@@ -93,6 +93,21 @@ data <- data %>%
     ))
   )
 
+data$housing_expenses_PP <- data$housing_expenses_total / data$household_size
+
+data <- data %>%
+  mutate(
+    category = case_when(
+      birth_year < 1965 ~ "idős",
+      housing_type != "piaci bérlet" ~ "fiatal_tulaj",
+      TRUE ~ "fiatal_bérlő"
+    ),
+    category = factor(category, levels = c("idős", "fiatal_tulaj", "fiatal_bérlő"))
+  )
+
+# Quick check
+table(data$category)
+
 # --- Save the cleaned and processed data ---
 save(data, file = "socio_demo_data.RData")
 
@@ -149,8 +164,18 @@ plot_numeric_vs <- function(x, y, color, title, palette = NULL) {
 }
 
 plot_numeric_vs("birth_year", "housing_expenses_total", "housing_type",
-                "Housing Expenses vs Birth Year by Housing Type",
+                "Total Housing Expenses of Household vs Birth Year by Housing Type",
                 c("red", "blue", "green", "orange", "purple", "brown"))
+
+plot_numeric_vs("birth_year", "housing_overburden", "housing_type",
+                "Housing Overburden Rate vs Birth Year by Housing Type",
+                c("red", "blue", "green", "orange", "purple", "brown"))
+
+
+plot_numeric_vs("birth_year", "housing_expenses_PP", "housing_type",
+                "Housing Expenses per person vs Birth Year by Housing Type",
+                c("red", "blue", "green", "orange", "purple", "brown"))
+
 
 plot_numeric_vs("birth_year", "housing_expenses_total", "lakhatasi_szegeny",
                 "Housing Expenses vs Birth Year by Housing Overburden",
