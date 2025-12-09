@@ -108,6 +108,41 @@ data <- data %>%
 # Quick check
 table(data$category)
 
+data <- data %>%
+  mutate(
+    category_A = case_when(
+      birth_year < 1965 ~ "idős",
+      housing_expenses_total > 100000 ~ "fiatal_prekár",
+      TRUE ~ "fiatal_stabil"
+    ),
+    category_A = factor(category_A, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
+  )
+
+table(data$category_A)
+data <- data %>%
+  mutate(
+    category_B = case_when(
+      birth_year < 1965 ~ "idős",
+      housing_expenses_PP > 100000 ~ "fiatal_prekár",
+      TRUE ~ "fiatal_stabil"
+    ),
+    category_B = factor(category_B, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
+  )
+
+table(data$category_B)
+data <- data %>%
+  mutate(
+    category_C = case_when(
+      birth_year < 1965 ~ "idős",
+      housing_overburden > 0.3 ~ "fiatal_prekár",
+      TRUE ~ "fiatal_stabil"
+    ),
+    category_C = factor(category_C, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
+  )
+
+table(data$category_C)
+
+
 # --- Save the cleaned and processed data ---
 save(data, file = "socio_demo_data.RData")
 
