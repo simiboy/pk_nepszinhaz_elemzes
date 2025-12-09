@@ -107,7 +107,7 @@ compute_code_sentiment <- function(data, my_code, my_category) {
 }
 
 
-plot_code_sentiment_across_categories <- function(data, code_name) {
+plot_code_sentiment_across_categories <- function(data, code_name, main_title) {
   # Get all unique categories
   categories <- unique(data$category)
   
@@ -132,7 +132,7 @@ plot_code_sentiment_across_categories <- function(data, code_name) {
     col = "skyblue",
     border = "white",
     ylim = c(0, 1),  # extra space for counts above bars
-    main = paste("Share of Positive Sentiment for Code:", code_name),
+    main = paste("Share of Positive Sentiment for\n", main_title),
     ylab = "Share Positive",
     xlab = "Category"
   )
@@ -144,10 +144,46 @@ plot_code_sentiment_across_categories <- function(data, code_name) {
     y = sentiment_summary$share_pos,
     labels = paste0("n=", sentiment_summary$n),
     pos = 1,
-    cex = 0.8,
+    cex = 1,
     col = "black"
   )
 }
 # Example usage
 #compute_code_sentiment(quotations, "Biztonságérzet", "fiatal_bérlő")
-plot_code_sentiment_across_categories(quotations, "Blaha Lujza tér")
+plot_code_sentiment_across_categories(quotations, "Blaha Lujza tér", "Blaha Lujza tér")
+
+unique_codes <- quotations %>%
+  filter(codegroup %in% c(
+    "Utcával kapcsolatos attitűdök", 
+    "Utca változásai", 
+    "Utcai fejlesztések értékelése", 
+    "Jövőkép az utcáról", 
+    "Társasház működése (jelenleg)", 
+    "Jövőkép a társasházról", 
+    "Önkormányzati szerep", 
+    "Lakhatási helyzet"
+  )) %>%
+  distinct(code, codegroup)
+
+
+# Loop through each code and inspect the plot
+for (i in 1:nrow(unique_codes)) {
+  code_name <- unique_codes$code[i]
+  code_group <- unique_codes$codegroup[i]
+  
+  if (!is.na(code_name)) {
+    
+    # Plot with code group in parentheses
+    plot_code_sentiment_across_categories(quotations, code_name, 
+                                          main_title = paste0(code_name, " (", code_group, ")"))
+    
+    # Wait for user input with option to quit
+    user_input <- readline(prompt = paste("Press [Enter] to continue to the next code, or type 'q' to quit:", 
+                                          code_name, "(", code_group, ")"))
+    if (tolower(user_input) == "q") {
+      cat("Quitting the loop.\n")
+      break
+    }
+  }
+}
+
