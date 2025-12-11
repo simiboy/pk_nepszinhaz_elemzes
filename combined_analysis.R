@@ -2,6 +2,17 @@ library(readxl)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+library(showtext)
+
+# Set as default font for base R plots
+font_add("InterItalic", "Inter-Italic.otf")  
+showtext_auto()
+par(family = "InterItalic")
+
+
+
+
+
 
 #1. Loading data
 
@@ -108,47 +119,39 @@ compute_code_sentiment <- function(data, my_code, my_category) {
 }
 
 
-plot_code_sentiment_across_categories <- function(data, code_name, main_title) {
-  # Get all unique categories
+plot_code_sentiment_across_categoriesplot_code_sentiment_across_categories <- function(data, code_name, main_title) {
+  
   categories <- unique(data$category)
   
-  # Compute sentiment and counts for each category
   sentiment_summary <- lapply(categories, function(cat) {
     df <- data %>% filter(code == code_name, category == cat)
-    
-    # Compute positive sentiment
     share_pos <- compute_code_sentiment(data, code_name, cat)
-    
-    # Count of quotations in this category for this code
     n_rows <- nrow(df)
-    
     return(data.frame(category = cat, share_pos = share_pos, n = n_rows))
   }) %>%
     bind_rows()
   
-  # Basic barplot
   barplot(
     sentiment_summary$share_pos,
-    names.arg = sentiment_summary$category,
+    names.arg = toupper(sentiment_summary$category),
     col = "#00AC57",
     border = "white",
-    ylim = c(0, 1),  # extra space for counts above bars
-    main = paste("Share of Positive Sentiment for\n", main_title),
-    ylab = "Share Positive",
-    xlab = "Category"
+    ylim = c(0, 1),
+    main = toupper(paste("POZITÍV ÉRZELEM ARÁNYA\n", main_title)),
+    ylab = toupper("Pozitív arány"),
+    xlab = toupper("Kategória")
   )
   
-
-  # Add n values 
   text(
     x = seq_along(sentiment_summary$share_pos),
     y = sentiment_summary$share_pos,
-    labels = paste0("n=", sentiment_summary$n),
+    labels = toupper(paste0("N=", sentiment_summary$n)),
     pos = 1,
     cex = 1,
     col = "black"
   )
 }
+
 # Example usage
 compute_code_sentiment(quotations, "Biztonságérzet", "fiatal_bérlő")
 plot_code_sentiment_across_categories(quotations, "Blaha Lujza tér", "Blaha Lujza tér")
@@ -226,41 +229,32 @@ compute_code_sentiment_gender <- function(data, my_code, my_gender) {
   return(share_positive)
 }
 
-plot_code_sentiment_across_genders <- function(data, code_name, main_title) {
+plot_code_sentiment_across_gendersplot_code_sentiment_across_genders <- function(data, code_name, main_title) {
   
-  # All gender groups in the data
   genders <- unique(data$gender)
   
-  # Compute sentiment per gender
   sentiment_summary <- lapply(genders, function(g) {
     df <- data %>% filter(code == code_name, gender == g)
-    
-    # Compute positive sentiment for this gender
     share_pos <- compute_code_sentiment_gender(data, code_name, g)
-    
-    # Count rows for this code & gender
     n_rows <- nrow(df)
-    
     return(data.frame(gender = g, share_pos = share_pos, n = n_rows))
   }) %>% bind_rows()
   
-  # Barplot
   barplot(
     sentiment_summary$share_pos,
-    names.arg = sentiment_summary$gender,
+    names.arg = toupper(sentiment_summary$gender),
     col = "#C38BA4",
     border = "white",
     ylim = c(0, 1),
-    main = paste("Share of Positive Sentiment for\n", main_title),
-    ylab = "Share Positive",
-    xlab = "Gender"
+    main = toupper(paste("POZITÍV ÉRZELEM ARÁNYA\n", main_title)),
+    ylab = toupper("Pozitív arány"),
+    xlab = toupper("Nem")
   )
   
-  # Add counts under bars
   text(
     x = seq_along(sentiment_summary$share_pos),
     y = sentiment_summary$share_pos,
-    labels = paste0("n=", sentiment_summary$n),
+    labels = toupper(paste0("N=", sentiment_summary$n)),
     pos = 1,
     cex = 1,
     col = "black"
@@ -334,54 +328,47 @@ compute_code_sentiment_location <- function(data, my_code, my_location) {
 
 plot_code_sentiment_across_locations <- function(data, code_name, main_title) {
   
-  # All elhelyezkedés groups
   locations <- levels(data$elhelyezkedés)
   
-  # Compute sentiment per location
   sentiment_summary <- lapply(locations, function(loc) {
     df <- data %>% filter(code == code_name, elhelyezkedés == loc)
-    
     share_pos <- compute_code_sentiment_location(data, code_name, loc)
     n_rows <- nrow(df)
-    
     return(data.frame(elhelyezkedés = loc, share_pos = share_pos, n = n_rows))
   }) %>% bind_rows()
   
-  old_par <- par(mar = c(10, 4, 4, 2))  # bottom = 10 lines
+  old_par <- par(mar = c(14, 4, 4, 2))
   
-  # barplot without names, save bar centers
   bar_centers <- barplot(
     sentiment_summary$share_pos,
-    names.arg = FALSE,        # we add rotated labels manually
+    names.arg = FALSE,
     col = "#3A439A",
     border = "white",
     ylim = c(0, 1),
-    main = paste("Share of Positive Sentiment for\n", main_title),
-    ylab = "Share Positive",
+    main = toupper(paste("POZITÍV ÉRZELEM ARÁNYA\n", main_title)),
+    ylab = toupper("Pozitív arány"),
     xlab = ""
   )
   
   text(
-    x = bar_centers, 
-    y = par("usr")[3] - 0.02,  # slightly below plot region
-    labels = sentiment_summary$elhelyezkedés,
-    srt = 45,                  # rotation angle
-    xpd = TRUE,                # allow drawing in margin area
+    x = bar_centers,
+    y = par("usr")[3] - 0.02,
+    labels = toupper(sentiment_summary$elhelyezkedés),
+    srt = 45,
+    xpd = TRUE,
     adj = 1,
     cex = 0.9
   )
   
-  # Add counts under bars (slightly above the labels)
   text(
     x = bar_centers,
     y = sentiment_summary$share_pos,
-    labels = paste0("n=", sentiment_summary$n),
+    labels = toupper(paste0("N=", sentiment_summary$n)),
     pos = 1,
     cex = 1,
     col = "black"
   )
   
-  # Reset to previous plot settings
   par(old_par)
 }
 
@@ -427,7 +414,7 @@ plot_codegroup_occurrence <- function(df, codegroup_name, as_percentage = TRUE) 
   if (as_percentage) {
     category_totals <- colSums(df_counts)  # total docs per category
     df_counts <- sweep(df_counts, 2, category_totals, FUN = "/") * 100
-    y_label <- "Percentage of documents"
+    y_label <- toupper("előfordulás aránya (%)")
   } else {
     y_label <- "Count"
   }
@@ -438,26 +425,26 @@ plot_codegroup_occurrence <- function(df, codegroup_name, as_percentage = TRUE) 
   colors <- setNames(custom_colors[1:length(categories)], categories)
   
   # Plot side-by-side barplot with space for rotated labels
-  par(mar = c(8, 5, 4, 2))  # increase bottom margin for x-axis labels
+  par(mar = c(14, 5, 4, 2))  # increase bottom margin for x-axis labels
   bp <- barplot(t(df_counts),
                 beside = TRUE,
                 col = colors,
                 xlab = "",
                 ylab = y_label,
                 names.arg = rep("", nrow(df_counts)),  # <- suppress default labels
-                main = paste("Occurrences of categories per code in codegroup:\n", codegroup_name),
+                main = toupper(paste("Különböző kódok előfordulása kategóriánként\n", codegroup_name)),
                 ylim = c(0, max(df_counts) * 1.2))
   
   # Rotate x-axis labels 45 degrees
   text(x = colMeans(bp), 
        y = par("usr")[3] - 0.05 * max(df_counts), 
-       labels = rownames(df_counts), 
+       labels = toupper(sub("-.*", "", rownames(df_counts))),
        srt = 45, 
        adj = 1, 
        xpd = TRUE)
   
   # Add legend
-  legend("topright", legend = categories, fill = colors, xpd = TRUE)
+  legend("topleft", legend = toupper(categories), fill = colors, xpd = TRUE)
 }
 
 # Example usage:
@@ -481,9 +468,9 @@ plot_codegroup_gender <- function(df, codegroup_name, as_percentage = TRUE) {
   if (as_percentage) {
     gender_totals <- colSums(df_counts)  # total docs per gender
     df_counts <- sweep(df_counts, 2, gender_totals, FUN = "/") * 100
-    y_label <- "Percentage of documents"
+    y_label <- "előfordulás aránya (%)"
   } else {
-    y_label <- "Count"
+    y_label <- "előfordulás száma"
   }
   
   # Define colors
@@ -492,26 +479,26 @@ plot_codegroup_gender <- function(df, codegroup_name, as_percentage = TRUE) {
   colors <- setNames(custom_colors[1:length(genders)], genders)
   
   # Plot side-by-side barplot with space for rotated labels
-  par(mar = c(8, 5, 4, 2))  # increase bottom margin for x-axis labels
+  par(mar = c(14, 5, 4, 2))  # increase bottom margin for x-axis labels
   bp <- barplot(t(df_counts),
                 beside = TRUE,
                 col = colors,
                 xlab = "",              
                 names.arg = rep("", nrow(df_counts)),  # <- suppress default labels
-                ylab = y_label,
-                main = paste("Occurrences of codes by gender in codegroup:\n", codegroup_name),
+                ylab = toupper(y_label),
+                main = toupper(paste("Különböző kódok előfordulása nemekre bontva\n", codegroup_name)),
                 ylim = c(0, max(df_counts) * 1.2))
   
   # Rotate x-axis labels 45 degrees
   text(x = colMeans(bp), 
        y = par("usr")[3] - 0.05 * max(df_counts), 
-       labels = rownames(df_counts), 
+       labels = toupper(sub("-.*", "", rownames(df_counts))),
        srt = 45, 
        adj = 1, 
        xpd = TRUE)
   
   # Add legend
-  legend("topright", legend = genders, fill = colors, xpd = TRUE)
+  legend("topleft", legend = toupper(genders), fill = colors, xpd = TRUE)
 }
 
 # Example usage:
