@@ -3,6 +3,7 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(showtext)
+library(stringr)
 
 # Set as default font for base R plots
 font_add("InterItalic", "Inter-Italic.otf")  
@@ -10,10 +11,7 @@ showtext_auto()
 par(family = "InterItalic")
 
 
-
-
-
-
+# ==============================
 #1. Loading data
 
 #1.1 Load interview-level metadata (contains IDs and attributes for each interview)
@@ -83,7 +81,227 @@ missing_in_quotations  # should be empty
 
 # =======  ANALYSIS ==============
 
-#2 Analysing based on citizen cateogries
+#2 Comparative analysis
+
+#2.1. Function to compute share_pos for ANY grouping variable
+
+quotations <- quotations %>%
+  mutate(
+    category = as.character(category),
+    gender   = as.character(gender),
+    code     = as.character(code)
+  )
+compute_sentiment <- function(data, code_name, group_var, group_value) {
+  
+  df <- data %>%
+    filter(code == code_name,
+           !!sym(group_var) == group_value)
+  
+  df_pos_neg <- data %>%
+    filter(codegroup == "Pozitív / Negatív") %>%
+    select(quotation, code)
+  
+  df <- df %>%
+    left_join(df_pos_neg, by = "quotation", suffix = c("", "_posneg"))
+  
+  df_summary <- df %>%
+    filter(!is.na(code_posneg)) %>%
+    group_by(document) %>%
+    summarise(
+      total_posneg = n(),
+      nr_pos = sum(code_posneg == "Pozitív"),
+      share_pos = nr_pos / total_posneg,
+      .groups = "drop"
+    )
+  
+  # Return both share_pos and N (total rows across documents)
+  tibble(
+    share_pos = mean(df_summary$share_pos, na.rm = TRUE),
+    N = sum(df_summary$total_posneg, na.rm = TRUE)
+  )
+}
+
+# ---------------------------------------------
+# 2.2. Build a complete table: code × (categories + genders)
+# ---------------------------------------------
+categories <- sort(unique(quotations$category))     # 3 levels
+genders    <- sort(unique(quotations$gender))       # 2 levels
+
+unique_codes <- quotations %>%
+  filter(codegroup %in% c(
+    "Utcával kapcsolatos attitűdök", 
+    "Utca változásai", 
+    "Utcai fejlesztések értékelése", 
+    "Jövőkép az utcáról", 
+    "Társasház működése (jelenleg)", 
+    "Jövőkép a társasházról", 
+    "Önkormányzati szerep", 
+    "Lakhatási helyzet"
+  )) %>%
+  distinct(code, codegroup) %>%
+  arrange(codegroup) %>%
+  pull(code)
+
+# Build all combinations
+grid <- expand.grid(
+  code = unique_codes,
+  group = c(categories, genders),
+  stringsAsFactors = FALSE
+)
+
+# Add type field (category or gender)
+grid <- grid %>%
+  mutate(group_type = ifelse(group %in% categories, "category", "gender"))
+
+# Compute sentiment share for each cell
+results <- grid %>%
+  rowwise() %>%
+  mutate(temp = list(compute_sentiment(
+    quotations, 
+    code_name = code,
+    group_var = ifelse(group_type == "category", "category", "gender"),
+    group_value = group
+  ))) %>%
+  unnest_wider(temp) %>%   # creates share_pos and N columns
+  ungroup()
+
+
+# ---------------------------------------------
+# 2.3. Create separate color scales
+#    - Categories: white → #00AC57
+#    - Genders   : white → #C38BA4
+# ---------------------------------------------
+
+# ggplot requires separate numeric scale → convert color to palette scale
+results <- results %>%
+  mutate(
+    shade = share_pos   # 0–1 scale for shading
+  )
+
+# ---------------------------------------------
+# 2.4. Plot: heatmap with custom shading per group type
+# ---------------------------------------------
+results <- results %>%
+  left_join(
+    quotations %>% distinct(code, codegroup),  # get one codegroup per code
+    by = "code"
+  )
+
+results <- results %>%
+  arrange(codegroup, code) %>%
+  mutate(
+    code = factor(code, levels = unique(code)),
+    codegroup = factor(codegroup)
+  )
+
+ggplot(results, aes(x = group, y = code, fill = shade)) +
+  geom_tile(color = "white") +
+  
+  # Add N as text
+  geom_text(aes(label = N), size = 3, color = "#444") +
+  
+  # Group codes on y-axis by codegroup
+  facet_grid(
+    rows = vars(codegroup),
+    cols = vars(group_type), 
+    scales = "free", 
+    space = "free"
+  ) +
+  
+  scale_fill_gradient2(
+    name = "Share positive",
+    limits = c(0, 1),
+    midpoint = 0.5,
+    low = "#C38BA4",
+    mid = "white",
+    high = "#00AC57",     # gradient for categories
+    na.value = "grey90"
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    strip.text   = element_text(face = "bold", size = 12),
+    strip.background = element_rect(fill = "grey95", color = NA),
+    panel.spacing = unit(0.4, "lines")
+  )
+
+
+#==========================
+#2.5 Same with elhelyezkedés
+
+# Get levels in the original order
+locations <- levels(quotations$elhelyezkedés)
+
+# Ensure 'elhelyezkedés' is a character/factor
+quotations <- quotations %>%
+  mutate(
+    elhelyezkedés = as.character(elhelyezkedés)
+  )
+
+# Build a grid: code × elhelyezkedés
+grid_locations <- expand.grid(
+  code = unique_codes,
+  group = locations,
+  stringsAsFactors = FALSE
+) %>%
+  mutate(group_type = "elhelyezkedés")
+
+# Compute sentiment for each code × location combination
+results_locations <- grid_locations %>%
+  rowwise() %>%
+  mutate(temp = list(compute_sentiment(
+    quotations,
+    code_name = code,
+    group_var = "elhelyezkedés",
+    group_value = group
+  ))) %>%
+  unnest_wider(temp) %>%
+  ungroup()
+
+# Add shade for heatmap
+results_locations <- results_locations %>%
+  mutate(shade = share_pos) %>%
+  left_join(
+    quotations %>% distinct(code, codegroup),
+    by = "code"
+  ) %>%
+  arrange(codegroup, code) %>%
+  mutate(
+    code = factor(code, levels = unique(code)),
+    codegroup = factor(codegroup)
+  )
+
+# Plot heatmap
+ggplot(results_locations, aes(x = group, y = code, fill = shade)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = N), size = 3, color = "#444") +
+  facet_grid(
+    rows = vars(codegroup),
+    cols = vars(group_type), 
+    scales = "free", 
+    space = "free"
+  ) +
+  scale_fill_gradient2(
+    name = "Share positive",
+    limits = c(0, 1),
+    midpoint = 0.5,
+    low = "#C38BA4",   # can adjust if desired
+    mid = "white",
+    high = "#00AC57",
+    na.value = "grey90"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    strip.text   = element_text(face = "bold", size = 12),
+    strip.background = element_rect(fill = "grey95", color = NA),
+    panel.spacing = unit(0.4, "lines")
+  )
+
+
+#============================================
+#3 Analysing based on citizen cateogries
 
 compute_code_sentiment <- function(data, my_code, my_category) {
   
@@ -191,6 +409,7 @@ for (i in 1:nrow(unique_codes)) {
     }
   }
 }
+
 
 #=========================================
 #3 Analysing based on gender
@@ -414,7 +633,7 @@ plot_codegroup_occurrence <- function(df, codegroup_name, as_percentage = TRUE) 
   if (as_percentage) {
     category_totals <- colSums(df_counts)  # total docs per category
     df_counts <- sweep(df_counts, 2, category_totals, FUN = "/") * 100
-    y_label <- toupper("előfordulás aránya (%)")
+    y_label <- "előfordulás aránya (%)"
   } else {
     y_label <- "Count"
   }
@@ -430,7 +649,7 @@ plot_codegroup_occurrence <- function(df, codegroup_name, as_percentage = TRUE) 
                 beside = TRUE,
                 col = colors,
                 xlab = "",
-                ylab = y_label,
+                ylab = toupper(y_label),
                 names.arg = rep("", nrow(df_counts)),  # <- suppress default labels
                 main = toupper(paste("Különböző kódok előfordulása kategóriánként\n", codegroup_name)),
                 ylim = c(0, max(df_counts) * 1.2))
