@@ -337,7 +337,7 @@ compute_code_sentiment <- function(data, my_code, my_category) {
 }
 
 
-plot_code_sentiment_across_categoriesplot_code_sentiment_across_categories <- function(data, code_name, main_title) {
+plot_code_sentiment_across_categories <- function(data, code_name, main_title) {
   
   categories <- unique(data$category)
   
@@ -448,7 +448,7 @@ compute_code_sentiment_gender <- function(data, my_code, my_gender) {
   return(share_positive)
 }
 
-plot_code_sentiment_across_gendersplot_code_sentiment_across_genders <- function(data, code_name, main_title) {
+plot_code_sentiment_across_genders <- function(data, code_name, main_title) {
   
   genders <- unique(data$gender)
   
@@ -619,110 +619,95 @@ for (i in 1:nrow(unique_codes)) {
 
 #====================================
 # 5. Codegroup distribution per category
-plot_codegroup_occurrence <- function(df, codegroup_name, as_percentage = TRUE) {
+plot_codegroup <- function(df, codegroup_name, group_var = "category") {
+  
+  # for debug
+  #df <- quotations
+  #codegroup_name <- "Utcahasználat (jelenleg)"
+  #group_var <- "category"
+  
+  unique_docs <- df[!duplicated(df$document), ]
+  
   # Filter for the specified codegroup
   df_filtered <- df[df$codegroup == codegroup_name, ]
   
-  # Count each code only once per document
-  df_unique <- unique(df_filtered[, c("document", "code", "category")])
-  
-  # Create table of occurrences
-  df_counts <- table(df_unique$code, df_unique$category)
-  
-  # If percentages requested, convert counts
-  if (as_percentage) {
-    category_totals <- colSums(df_counts)  # total docs per category
-    df_counts <- sweep(df_counts, 2, category_totals, FUN = "/") * 100
-    y_label <- "előfordulás aránya (%)"
+  # Determine grouping
+  if (!is.na(group_var) && group_var %in% colnames(df)) {
+    # Count each code once per document per group
+    df_unique <- unique(df_filtered[, c("document", "code", group_var)])
+    
+    # Ensure group_var is a factor (if not already)
+    df_unique[[group_var]] <- factor(df_unique[[group_var]], levels = levels(df[[group_var]]))
+    
+    # Create table with group levels preserved
+    df_counts <- table(df_unique$code, df_unique[[group_var]])
+    df_counts <- df_counts[, levels(df_unique[[group_var]]), drop = FALSE]  # enforce column order
+    
+    group_totals <- table(unique_docs[[group_var]])
+    df_counts <- sweep(df_counts, 2, group_totals, FUN = "/") * 100
+
+    # Define colors
+    groups <- colnames(df_counts)
+    custom_colors <- c("#00AC57",  "#3A439A", "#DF7201", "#254335",  "#80D5AB", "#C896AC")
+    colors <- setNames(custom_colors[1:length(groups)], groups)
+    
+    # Plot
+    par(mar = c(14, 5, 4, 2))
+    bp <- barplot(t(df_counts),
+                  beside = TRUE,
+                  col = colors,
+                  xlab = "",
+                  ylab = toupper("előfordulás aránya (%)"),
+                  names.arg = rep("", nrow(df_counts)),
+                  main = toupper(paste("Kódok előfordulása", 
+                                       ifelse(group_var == "gender", "nemekre bontva", "kategóriánként"),
+                                       "\n", codegroup_name)),
+                  ylim = c(0, max(df_counts) * 1.2))
+    
+    # Rotate x-axis labels
+    text(x = colMeans(bp), 
+         y = par("usr")[3] - 0.05 * max(df_counts), 
+         labels = toupper(sub("-.*", "", rownames(df_counts))),
+         srt = 45, adj = 1, xpd = TRUE)
+    
+    # Add legend
+    legend(16, 60, legend = toupper(groups), fill = colors, xpd = TRUE)
+    
   } else {
-    y_label <- "Count"
+    # No grouping variable, just counts per code
+    df_unique <- unique(df_filtered[, c("document", "code")])
+    df_counts <- table(df_unique$code)
+    
+    df_counts <- df_counts / nrow(unique_docs) * 100
+    
+    # Plot
+    par(mar = c(14, 5, 4, 2))
+    bp <- barplot(df_counts,
+                  col = "#00AC57",
+                  xlab = "",
+                  ylab = toupper("előfordulás aránya (%)"),
+                  names.arg = rep("", length(df_counts)),  # suppress default labels
+                  main = toupper(paste("Kódok előfordulása\n", codegroup_name)),
+                  ylim = c(0, max(df_counts) * 1.2))
+    
+    # Add x-axis labels rotated 45 degrees
+    text(x = bp, 
+         y = par("usr")[3] - 0.05 * max(df_counts), 
+         labels = toupper(sub("-.*", "", names(df_counts))),
+         srt = 45, adj = 1, xpd = TRUE)
   }
-  
-  # Define colors
-  categories <- colnames(df_counts)
-  custom_colors <- c("#00AC57", "#254335", "#DF7201","#3A439A", "#80D5AB", "#C896AC")
-  colors <- setNames(custom_colors[1:length(categories)], categories)
-  
-  # Plot side-by-side barplot with space for rotated labels
-  par(mar = c(14, 5, 4, 2))  # increase bottom margin for x-axis labels
-  bp <- barplot(t(df_counts),
-                beside = TRUE,
-                col = colors,
-                xlab = "",
-                ylab = toupper(y_label),
-                names.arg = rep("", nrow(df_counts)),  # <- suppress default labels
-                main = toupper(paste("Különböző kódok előfordulása kategóriánként\n", codegroup_name)),
-                ylim = c(0, max(df_counts) * 1.2))
-  
-  # Rotate x-axis labels 45 degrees
-  text(x = colMeans(bp), 
-       y = par("usr")[3] - 0.05 * max(df_counts), 
-       labels = toupper(sub("-.*", "", rownames(df_counts))),
-       srt = 45, 
-       adj = 1, 
-       xpd = TRUE)
-  
-  # Add legend
-  legend("topleft", legend = toupper(categories), fill = colors, xpd = TRUE)
 }
 
-# Example usage:
-plot_codegroup_occurrence(quotations, "Ideköltözés okai és körülményei")
-plot_codegroup_occurrence(quotations, "Utcán mit változtatna")
-plot_codegroup_occurrence(quotations, "Utcahasználat (jelenleg)")
 
-#====================================
-# 6. Codegroup distribution per GENDER
-plot_codegroup_gender <- function(df, codegroup_name, as_percentage = TRUE) {
-  # Filter for the specified codegroup
-  df_filtered <- df[df$codegroup == codegroup_name, ]
-  
-  # Count each code only once per document
-  df_unique <- unique(df_filtered[, c("document", "code", "gender")])
-  
-  # Create table of occurrences by gender
-  df_counts <- table(df_unique$code, df_unique$gender)
-  
-  # If percentages requested, convert counts
-  if (as_percentage) {
-    gender_totals <- colSums(df_counts)  # total docs per gender
-    df_counts <- sweep(df_counts, 2, gender_totals, FUN = "/") * 100
-    y_label <- "előfordulás aránya (%)"
-  } else {
-    y_label <- "előfordulás száma"
-  }
-  
-  # Define colors
-  genders <- colnames(df_counts)
-  custom_colors <- c("#00AC57", "#3A439A")
-  colors <- setNames(custom_colors[1:length(genders)], genders)
-  
-  # Plot side-by-side barplot with space for rotated labels
-  par(mar = c(14, 5, 4, 2))  # increase bottom margin for x-axis labels
-  bp <- barplot(t(df_counts),
-                beside = TRUE,
-                col = colors,
-                xlab = "",              
-                names.arg = rep("", nrow(df_counts)),  # <- suppress default labels
-                ylab = toupper(y_label),
-                main = toupper(paste("Különböző kódok előfordulása nemekre bontva\n", codegroup_name)),
-                ylim = c(0, max(df_counts) * 1.2))
-  
-  # Rotate x-axis labels 45 degrees
-  text(x = colMeans(bp), 
-       y = par("usr")[3] - 0.05 * max(df_counts), 
-       labels = toupper(sub("-.*", "", rownames(df_counts))),
-       srt = 45, 
-       adj = 1, 
-       xpd = TRUE)
-  
-  # Add legend
-  legend("topleft", legend = toupper(genders), fill = colors, xpd = TRUE)
-}
+plot_codegroup(quotations, "Ideköltözés okai és körülményei", group_var = NA)
+plot_codegroup(quotations, "Ideköltözés okai és körülményei", group_var = "category")
+plot_codegroup(quotations, "Ideköltözés okai és körülményei", group_var = "gender")
+plot_codegroup(quotations, "Utcahasználat (jelenleg)", group_var = NA)
+plot_codegroup(quotations, "Utcahasználat (jelenleg)", group_var = "category")
+plot_codegroup(quotations, "Utcahasználat (jelenleg)", group_var = "gender")
+plot_codegroup(quotations, "Utcán mit változtatna", group_var = NA)
+plot_codegroup(quotations, "Utcán mit változtatna", group_var = "category")
+plot_codegroup(quotations, "Utcán mit változtatna", group_var = "gender")
 
-# Example usage:
-plot_codegroup_gender(quotations, "Ideköltözés okai és körülményei")
-plot_codegroup_gender(quotations, "Utcán mit változtatna")
-plot_codegroup_gender(quotations, "Utcahasználat (jelenleg)")
 
 
