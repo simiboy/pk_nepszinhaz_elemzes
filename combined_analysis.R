@@ -57,7 +57,7 @@ quotations <- quotations %>%
 quotations <- quotations %>%
   left_join(
     interview_data %>%
-      select(id, category, elhelyezkedés, gender),   # Add more metadata columns here if needed
+      select(id, category, elhelyezkedés, gender, f_years_in_apartment_grp),   # Add more metadata columns here if needed
     by = c("document" = "id")
   )
 
@@ -383,7 +383,6 @@ plot_code_sentiment_across_categories <- function(data, code_name, main_title) {
 # Example usage
 compute_code_sentiment(quotations, "Biztonságérzet", "fiatal_bérlő")
 plot_code_sentiment_across_categories(quotations, "Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
-
 
 
 #=========================================
@@ -791,7 +790,7 @@ plot_codegroup <- function(df, codegroup_name, group_var = "category") {
 
     # Define colors
     groups <- colnames(df_counts)
-    custom_colors <- c("#00AC57",  "#3A439A", "#DF7201", "#254335",  "#80D5AB", "#C896AC")
+    custom_colors <- c("#00AC57",  "#3A439A", "#DF7201", "#C896AC",  "#80D5AB", "#C896AC")
     colors <- setNames(custom_colors[1:length(groups)], groups)
     
     # Plot
@@ -805,7 +804,7 @@ plot_codegroup <- function(df, codegroup_name, group_var = "category") {
                   main = toupper(paste("Kódok előfordulása", 
                                        ifelse(group_var == "gender", "nemekre bontva", "kategóriánként"),
                                        "\n", codegroup_name)),
-                  ylim = c(0, max(df_counts) * 1.2))
+                  ylim = c(0, 100))
     
     # Rotate x-axis labels
     text(x = colMeans(bp), 
@@ -814,7 +813,7 @@ plot_codegroup <- function(df, codegroup_name, group_var = "category") {
          srt = 45, adj = 1, xpd = TRUE)
     
     # Add legend
-    legend(16, 60, legend = toupper(groups), fill = colors, xpd = TRUE)
+    legend("topleft", legend = toupper(groups), fill = colors, xpd = TRUE)
     
   } else {
     # No grouping variable, just counts per code
@@ -831,7 +830,7 @@ plot_codegroup <- function(df, codegroup_name, group_var = "category") {
                   ylab = toupper("előfordulás aránya (%)"),
                   names.arg = rep("", length(df_counts)),  # suppress default labels
                   main = toupper(paste("Kódok előfordulása\n", codegroup_name)),
-                  ylim = c(0, max(df_counts) * 1.2))
+                  ylim = c(0, 100))
     
     # Add x-axis labels rotated 45 degrees
     text(x = bp, 
@@ -841,10 +840,87 @@ plot_codegroup <- function(df, codegroup_name, group_var = "category") {
   }
 }
 
+plot_codegroup_stacked <- function(df, codegroup_name, group_var = "category") {
+  
+  # Filter for the specified codegroup
+  df_filtered <- df[df$codegroup == codegroup_name, ]
+  
+  # Keep one occurrence per document–code–group
+  df_unique <- unique(df_filtered[, c("document", "code", group_var)])
+  
+  # Ensure grouping variable is factor with original levels
+  df_unique[[group_var]] <- factor(
+    df_unique[[group_var]],
+    levels = levels(df[[group_var]])
+  )
+  
+  # Count codes per group
+  df_counts <- table(df_unique[[group_var]], df_unique$code)
+  
+  # Convert to percentages within each group (row-wise)
+  df_perc <- prop.table(df_counts, margin = 1) * 100
+  
+  # Group sizes (n per category)
+  group_n <- table(unique(df[, c("document", group_var)])[[group_var]])
+  print(group_n)
+  # Define colors for codes
+  codes <- colnames(df_perc)
+  custom_colors <- c(
+    "#353535","#00AC57", "#DF7201", "#3A439A",
+    "#80D5AB", "#9C3C3C", "#6A5ACD", "#B8860B"
+  )
+  colors <- setNames(custom_colors[1:length(codes)], codes)
+  
+  # Plot
+  par(mar = c(16, 5, 4, 2), xpd = TRUE)
+  
+  bp <- barplot(
+    t(df_perc),
+    col = colors,
+    border = NA,
+    xlab = ,
+    ylab = toupper("előfordulás aránya (%)"),
+    names.arg = rep("", nrow(df_perc)),
+    main = toupper(codegroup_name),
+    ylim = c(0, 100)
+  )
+  
+  # Add x-axis labels rotated 45 degrees
+  text(x = bp, 
+       y = -10, 
+       labels = toupper(levels(df[[group_var]])),
+       srt = 45, adj = 1, xpd = TRUE)
+  
+  # Add N below each column
+  text(
+    x = bp,
+    y = -5,
+    labels = paste0("N = ", group_n),
+    xpd = TRUE,
+    cex = 0.9
+  )
+  
+  # Legend for codes
+  legend(
+    x = 0.8,
+    y = -75,
+    legend = rev(toupper(codes)),
+    fill = rev(colors),
+    cex = 0.9
+  )
+  mtext(
+    toupper("Mikor költözött a lakásba?"),
+    side = 1,
+    line = 9
+  )
+}
+
+
 
 plot_codegroup(quotations, "Ideköltözés okai és körülményei", group_var = NA)
 plot_codegroup(quotations, "Ideköltözés okai és körülményei", group_var = "category")
 plot_codegroup(quotations, "Ideköltözés okai és körülményei", group_var = "gender")
+plot_codegroup_stacked(quotations, "Ideköltözés okai és körülményei", group_var = "f_years_in_apartment_grp")
 plot_codegroup(quotations, "Utcahasználat (jelenleg)", group_var = NA)
 plot_codegroup(quotations, "Utcahasználat (jelenleg)", group_var = "category")
 plot_codegroup(quotations, "Utcahasználat (jelenleg)", group_var = "gender")

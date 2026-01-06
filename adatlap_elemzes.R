@@ -143,6 +143,25 @@ interview_data <- interview_data %>%
 table(interview_data$category_C)
 
 
+
+interview_data$f_years_in_apartment_grp <- factor(
+  dplyr::case_when(
+    interview_data$years_in_apartment <= 1990 ~ "1990 előtt",
+    interview_data$years_in_apartment > 1990 &
+      interview_data$years_in_apartment <= 2016 ~ "1990 és 2016 között",
+    interview_data$years_in_apartment > 2016 &
+      interview_data$years_in_apartment <= 2023 ~ "2016 és 2023 között",
+    interview_data$years_in_apartment > 2023 ~ "utóbbi két évben",
+    TRUE ~ NA_character_
+  ),
+  levels = c(
+    "1990 előtt",
+    "1990 és 2016 között",
+    "2016 és 2023 között",
+    "utóbbi két évben"
+  )
+)
+
 # --- Save the cleaned and processed interview_data ---
 save(interview_data, file = "interview_data.RData")
 
@@ -260,11 +279,21 @@ plot_stacked_bar(interview_data, "education_aggr", "expense_coverage",
 # elhelyezkedés elemzés
 
 # --- 1. Create age groups ---
+# Create a 3-level age_group based on birth_year as requested:
+#  - "old" when birth_year <= 1960
+#  - "middleaged" when birth_year <= 1990
+#  - "young" when birth_year > 1990
 interview_data <- interview_data %>%
-  mutate(age = 2025 - birth_year,  # replace 2025 with the current year if needed
-         age_group = cut(age,
-                         breaks = c(-Inf, 29, 49, 64, Inf),
-                         labels = c("<30", "30-49", "50-64", "65+")))
+  mutate(
+    age = 2025 - birth_year,  # keep numeric age if needed elsewhere
+    age_group = dplyr::case_when(
+      !is.na(birth_year) & birth_year <= 1960 ~ "idős",
+      !is.na(birth_year) & birth_year <= 1990 ~ "középkorú",
+      !is.na(birth_year) & birth_year > 1990  ~ "fiatal",
+      TRUE ~ NA_character_
+    ),
+    age_group = factor(age_group, levels = c("idős", "középkorú", "fiatal"))
+  )
 
 # --- 2. Stacked barplots by elhelyezkedés ---
 # Education by elhelyezkedés
@@ -312,7 +341,7 @@ text(x = 0.8, y = 700, "n =", col = "red", pos = 3)
 plot_stacked_bar(interview_data, "elhelyezkedés", "housing_type", "Housing Type by elhelyezkedés")
 
 # Age group by elhelyezkedés
-age_colors <- c("<30" = "#F8766D", "30-49" = "#7CAE00", "50-64" = "#00BFC4", "65+" = "#C77CFF")
+age_colors <- c("young" = "#F8766D", "middleaged" = "#7CAE00", "old" = "#00BFC4")
 
 plot_stacked_bar(interview_data, "elhelyezkedés", "age_group", "Age Groups by elhelyezkedés", palette = age_colors)
 
@@ -406,4 +435,6 @@ legend(
   bty = "n",
   pt.cex = 1.2
 )
+
+
 
