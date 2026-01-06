@@ -31,8 +31,8 @@ clean_currency <- function(x) {
   as.integer(ifelse(x_clean == "" | is.na(x_clean), NA, x_clean))
 }
 
-interview_data[currency_cols] <- lapply(interview_data[currency_cols], clean_currency)
 currency_cols <- c("housing_expenses_total", "utilities_cost", "rent_cost", "mortgage_cost", "total_income")
+interview_data[currency_cols] <- lapply(interview_data[currency_cols], clean_currency)
 interview_data[currency_cols] <- lapply(interview_data[currency_cols], clean_currency)
 
 
@@ -43,6 +43,11 @@ interview_data <- interview_data %>%
     tarsashazak %>% select(cím, elhelyezkedés),
     by = c("address" = "cím")
   )
+
+# Clean `housing_type`: remove any parenthetical explanations (e.g., "(...)")
+# and trim surrounding whitespace so factor levels are concise.
+interview_data <- interview_data %>%
+  mutate(housing_type = trimws(gsub("[[:space:]]*\\([^)]*\\)", "", housing_type)))
 
 # Convert factors
 interview_data <- interview_data %>%
@@ -90,7 +95,18 @@ interview_data <- interview_data %>%
     
     education_aggr = factor(education_aggr, levels = c(
       "érettségi alatt", "érettségi", "diploma"
-    ))
+    )),
+    age_group = dplyr::case_when(
+          !is.na(birth_year) & birth_year <= 1960 ~ "65 év feletti",
+          !is.na(birth_year) & birth_year <= 1990 ~ "35 és 65 év közötti",
+          !is.na(birth_year) & birth_year > 1990  ~ "35 év alatti",
+          TRUE ~ NA_character_
+      ),
+      age_group = factor(age_group, levels = c("65 év feletti", "35 és 65 év közötti", "35 év alatti")),
+    housing_type_aggr = case_when(
+      housing_type == "saját tulajdon" ~ "tulajdonos",
+      housing_type != "saját tulajdon" ~ "nem tulajdonos"
+    )
   )
 
 interview_data$housing_expenses_PP <- interview_data$housing_expenses_total / interview_data$household_size
@@ -277,23 +293,6 @@ plot_stacked_bar(interview_data, "education_aggr", "expense_coverage",
 
 
 # elhelyezkedés elemzés
-
-# --- 1. Create age groups ---
-# Create a 3-level age_group based on birth_year as requested:
-#  - "old" when birth_year <= 1960
-#  - "middleaged" when birth_year <= 1990
-#  - "young" when birth_year > 1990
-interview_data <- interview_data %>%
-  mutate(
-    age = 2025 - birth_year,  # keep numeric age if needed elsewhere
-    age_group = dplyr::case_when(
-      !is.na(birth_year) & birth_year <= 1960 ~ "idős",
-      !is.na(birth_year) & birth_year <= 1990 ~ "középkorú",
-      !is.na(birth_year) & birth_year > 1990  ~ "fiatal",
-      TRUE ~ NA_character_
-    ),
-    age_group = factor(age_group, levels = c("idős", "középkorú", "fiatal"))
-  )
 
 # --- 2. Stacked barplots by elhelyezkedés ---
 # Education by elhelyezkedés

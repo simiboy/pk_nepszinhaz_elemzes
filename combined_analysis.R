@@ -1,3 +1,4 @@
+
 library(readxl)
 library(dplyr)
 library(tidyr)
@@ -57,7 +58,7 @@ quotations <- quotations %>%
 quotations <- quotations %>%
   left_join(
     interview_data %>%
-      select(id, category, elhelyezkedés, gender, f_years_in_apartment_grp),   # Add more metadata columns here if needed
+      select(id, category, elhelyezkedés, gender, f_years_in_apartment_grp, age_group, housing_type_aggr),   # Add more metadata columns here if needed
     by = c("document" = "id")
   )
 
@@ -302,6 +303,82 @@ ggplot(results_locations, aes(x = group, y = code, fill = shade)) +
   )
 
 
+# ---------------------------------------------
+# 2.4b. Heatmap: using age_group, gender and housing_type_aggr on x-axis
+# ---------------------------------------------
+
+# Ensure we have character group labels
+quotations <- quotations %>%
+  mutate(
+    age_group = as.character(age_group),
+    gender = as.character(gender),
+    housing_type_aggr = as.character(housing_type_aggr)
+  )
+
+ # Prefer factor level ordering from `interview_data` (if present), fallback to available values in `quotations`
+age_levels <- if(!is.null(levels(interview_data$age_group))) levels(interview_data$age_group) else sort(unique(quotations$age_group))
+gender_levels <- if(!is.null(levels(interview_data$gender))) levels(interview_data$gender) else sort(unique(quotations$gender))
+housing_levels <- if(!is.null(levels(interview_data$housing_type_aggr))) levels(interview_data$housing_type_aggr) else sort(unique(quotations$housing_type_aggr))
+
+# Build grids and set group as a factor with the desired ordering per variable
+grid_age <- expand.grid(code = unique_codes, group = age_levels, stringsAsFactors = FALSE) %>%
+  mutate(group_type = "age_group", group = factor(group, levels = age_levels))
+grid_gender <- expand.grid(code = unique_codes, group = gender_levels, stringsAsFactors = FALSE) %>%
+  mutate(group_type = "gender", group = factor(group, levels = gender_levels))
+grid_housing <- expand.grid(code = unique_codes, group = housing_levels, stringsAsFactors = FALSE) %>%
+  mutate(group_type = "housing_type_aggr", group = factor(group, levels = housing_levels))
+
+grid_vars <- bind_rows(grid_age, grid_gender, grid_housing)
+
+results_vars <- grid_vars %>%
+  rowwise() %>%
+  mutate(temp = list(compute_sentiment(
+    quotations,
+    code_name = code,
+    group_var = group_type,
+    group_value = group
+  ))) %>%
+  unnest_wider(temp) %>%
+  ungroup() %>%
+  mutate(shade = share_pos) %>%
+  left_join(
+    quotations %>% distinct(code, codegroup),
+    by = "code"
+  ) %>%
+  arrange(codegroup, code) %>%
+  mutate(
+    code = factor(code, levels = unique(code)),
+    codegroup = factor(codegroup)
+  )
+
+
+# Plot heatmap for the three variables
+ggplot(results_vars, aes(x = group, y = code, fill = shade)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = N), size = 3, color = "#444") +
+  facet_grid(
+    rows = vars(codegroup),
+    cols = vars(group_type),
+    scales = "free",
+    space = "free"
+  ) +
+  scale_fill_gradient2(
+    name = "Share positive",
+    limits = c(0, 1),
+    midpoint = 0.5,
+    low = "#C38BA4",
+    mid = "white",
+    high = "#00AC57",
+    na.value = "grey90"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    strip.text   = element_text(face = "bold", size = 12),
+    strip.background = element_rect(fill = "grey95", color = NA),
+    panel.spacing = unit(0.4, "lines")
+  )
+
 #============================================
 #3 Analysing based on citizen cateogries
 
@@ -383,6 +460,14 @@ plot_code_sentiment_across_categories <- function(data, code_name, main_title) {
 # Example usage
 compute_code_sentiment(quotations, "Biztonságérzet", "fiatal_bérlő")
 plot_code_sentiment_across_categories(quotations, "Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
+
+plot_code_sentiment_across_categories(quotations, "Általános jövőkép", "Általános jövőkép (Jövőkép az utcáról)")
+plot_code_sentiment_across_categories(quotations, "Társadalmi sokszínűség (etnikai / osztálybeli / más)", "Társadalmi sokszínűség \n(Utcával kapcsolatos attitűdök)"
+)
+plot_code_sentiment_across_categories(quotations, "Biztonságérzet", "Biztonságérzet \n(Utcával kapcsolatos attitűdök)"
+)
+plot_code_sentiment_across_categories(quotations, "Tisztaság / rendezettség", "Tisztaság / rendezettség \n(Utcával kapcsolatos attitűdök)"
+)
 
 
 #=========================================
@@ -471,6 +556,13 @@ plot_code_sentiment_across_genders <- function(data, code_name, main_title) {
 compute_code_sentiment_gender(quotations, "Általános jövőkép", "Férfi")
 plot_code_sentiment_across_genders(quotations, "Általános jövőkép", "Általános jövőkép (Jövőkép az utcáról)")
 
+plot_code_sentiment_across_genders(quotations, "Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
+plot_code_sentiment_across_genders(quotations, "Társadalmi sokszínűség (etnikai / osztálybeli / más)", "Társadalmi sokszínűség \n(Utcával kapcsolatos attitűdök)"
+)
+plot_code_sentiment_across_genders(quotations, "Biztonságérzet", "Biztonságérzet \n(Utcával kapcsolatos attitűdök)"
+)
+plot_code_sentiment_across_genders(quotations, "Tisztaság / rendezettség", "Tisztaság / rendezettség \n(Utcával kapcsolatos attitűdök)"
+)
 
 
 #=========================================
@@ -933,8 +1025,6 @@ plot_codegroup(quotations, "Utcán mit változtatna", group_var = "gender")
 
 #============================================
 #8 Analysing based on citizen cateogries
-
-#todo: megnézni utcai fejlesztéseket poz-neg-nincshatasa-ra bontva
 
 
 compute_code_sentiment_developments <- function(data, my_code, my_category) {
