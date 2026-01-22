@@ -85,6 +85,7 @@ missing_in_quotations # should be empty
 
 quotations$code[quotations$code == "Pápa tér"] <- "II. János Pál pápa tér" 
 quotations$code[quotations$code == "Kis zöldítések / torkollatok"] <- "Utcai zöldítések"
+quotations$code[quotations$code == "Közlekedési élmények"] <- "Közlekedés"
 
 #1.6 exporting code frequencies 
 
@@ -106,33 +107,30 @@ final_df <- interview_data %>%
 
 #1.7 exporting code sentiment shares 
 
-quotations_sentiment <- quotations %>%
+
+sentiment_rows <- quotations %>%
+  filter(code %in% c("Pozitív", "Negatív")) %>%
   mutate(
-    sentiment = case_when(
-      code == "Pozitív" ~ "positive",
-      code == "Negatív" ~ "negative",
-      TRUE ~ NA_character_
-    )
-  )
-quotation_sentiment_map <- quotations_sentiment %>%
-  group_by(document, quotation) %>%
-  summarise(
-    sentiment = sentiment[!is.na(sentiment)][1],
-    .groups = "drop"
-  )
-quotations_for_sentiment <- quotations_sentiment %>%
-  filter(!code %in% c("Pozitív", "Negatív")) %>%
-  left_join(
-    quotation_sentiment_map,
-    by = c("document", "quotation")
+    sentiment = if_else(code == "Pozitív", "positive", "negative")
   ) %>%
-  mutate(code_col = paste(codegroup, code, sep = " - "))
-quotations_for_sentiment <- quotations_for_sentiment %>%
-  select(-sentiment.x) %>%
-  rename(sentiment = sentiment.y)
+  select(document, quotation, sentiment)
+
+substantive_codes <- quotations %>%
+  filter(!code %in% c("Pozitív", "Negatív")) %>%
+  mutate(
+    code_col = paste(codegroup, code, sep = " - ")
+  )
+
+quotations_for_sentiment <- substantive_codes %>%
+  inner_join(
+    sentiment_rows,
+    by = c("document", "quotation")
+  )
+
 sentiment_counts <- quotations_for_sentiment %>%
-  filter(sentiment %in% c("positive", "negative")) %>%
   count(document, code_col, sentiment)
+
+
 sentiment_share <- sentiment_counts %>%
   pivot_wider(
     names_from = sentiment,
@@ -143,12 +141,14 @@ sentiment_share <- sentiment_counts %>%
     sentiment_share = positive / (positive + negative)
   ) %>%
   select(document, code_col, sentiment_share)
+
 sentiment_wide <- sentiment_share %>%
   pivot_wider(
     names_from = code_col,
     values_from = sentiment_share,
     values_fill = NA
   )
+
 final_df_sentiment <- interview_data %>%
   left_join(
     sentiment_wide,
@@ -559,6 +559,18 @@ ggplot(results, aes(x = group, y = code, fill = shade)) +
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 #============================================
 #3 Analysing based on clusters and genders
 
@@ -768,7 +780,7 @@ plot_code_sentiment_categories_and_genders <- function(data, code_name, main_tit
   colnames(bar_matrix) <- combined$label
   
   ## -------- plot --------
-  old_par <- par(mar = c(4.5, 12, 4, 3))
+  old_par <- par(mar = c(4.5, 12, 4, 10))
   bp <- barplot(
     bar_matrix,
     col = bar_colors,
@@ -803,8 +815,8 @@ plot_code_sentiment_categories_and_genders <- function(data, code_name, main_tit
   )
   
   legend(
-    "topleft",
-    inset = c(-0.5, -0.4),
+    "topright",
+    inset = c(-0.45, 0.05),
     legend = c("POZITÍV", "NEGATÍV"),
     fill = bar_colors,
     border = "grey40",
@@ -839,8 +851,6 @@ plot_code_sentiment_categories_and_genders(final_df_sentiment, "Utcával kapcsol
 plot_code_sentiment_categories_and_genders(final_df_sentiment, "Jövőkép az utcáról - Jövőkép az utcáról", "Általános jövőkép az utcáról")
 plot_code_sentiment_categories_and_genders(final_df_sentiment,  "Utca változásai - Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
 plot_code_sentiment_categories_and_genders(final_df_sentiment, "Utcával kapcsolatos attitűdök - Környezeti benyomások (zaj / szmog / más)", "Környezeti benyomások\n(Utcával kapcsolatos attitűdök)")
-
-
 plot_code_sentiment_categories_and_genders(final_df_sentiment,  "Utca változásai - Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
 plot_code_sentiment_categories_and_genders(final_df_sentiment,  "Utca változásai - Fizikai környezet és utcakép változásai", "Fizikai környezet és utcakép változásai\n(Utca változásai)")
 plot_code_sentiment_categories_and_genders(final_df_sentiment,  "Utca változásai - Lakossági összetétel / közösségek", "Lakossági összetétel / közösségek\n(Utca változásai)")
