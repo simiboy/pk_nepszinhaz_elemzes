@@ -1,10 +1,19 @@
 # --- Libraries ---
 library(dplyr)
 library(ggplot2)
+library(forcats)
 library(corrplot)
 library(DescTools)
 library(polycor)
 library(scales)
+library(showtext)
+library(stringr)
+
+# Set as default font for base R plots
+font_add("InterItalic", "Inter-Italic.otf")  
+showtext_auto()
+par(family = "InterItalic")
+
 
 # --- 1. Load Data ---
 read_data <- function(filepath, column_names) {
@@ -60,7 +69,10 @@ interview_data <- interview_data %>%
       "szakközépiskolai érettségi",
       "gimnáziumi érettségi",
       "főiskolai v. egyetemi diploma")),
-    housing_type = factor(housing_type),
+    housing_type = fct_recode(
+      factor(housing_type),
+      "szívességi használat" =
+        "rokon vagy ismerős tulajdona / szívességi használat"),
     apartment_location = factor(apartment_location),
     expense_coverage = factor(expense_coverage, levels = c(
       "Nagyon nehezen", "Nehezen", "Viszonylag nehezen",
@@ -97,12 +109,13 @@ interview_data <- interview_data %>%
       "érettségi alatt", "érettségi", "diploma"
     )),
     age_group = dplyr::case_when(
-          !is.na(birth_year) & birth_year <= 1960 ~ "65 év feletti",
-          !is.na(birth_year) & birth_year <= 1990 ~ "35 és 65 év közötti",
-          !is.na(birth_year) & birth_year > 1990  ~ "35 év alatti",
+          !is.na(birth_year) & birth_year < 1960 ~ "65 év feletti",
+          !is.na(birth_year) & birth_year < 1975 ~ "50 és 64 év közötti",
+          !is.na(birth_year) & birth_year < 1995 ~ "30 és 49 év közötti",
+          !is.na(birth_year)  ~ "18 és 29 év közötti",
           TRUE ~ NA_character_
       ),
-      age_group = factor(age_group, levels = c("65 év feletti", "35 és 65 év közötti", "35 év alatti")),
+      age_group = factor(age_group, levels = c("65 év feletti", "50 és 64 év közötti", "30 és 49 év közötti", "18 és 29 év közötti")),
     housing_type_aggr = case_when(
       housing_type == "saját tulajdon" ~ "tulajdonos",
       housing_type != "saját tulajdon" ~ "nem tulajdonos"
@@ -115,48 +128,48 @@ interview_data <- interview_data %>%
   mutate(
     category = case_when(
       birth_year < 1965 ~ "idős",
-      housing_type != "piaci bérlet" ~ "fiatal_tulaj",
-      TRUE ~ "fiatal_bérlő"
+      housing_type == "saját tulajdon" ~ "fiatalabb tulajdonos",
+      TRUE ~ "fiatalabb bérlő"
     ),
-    category = factor(category, levels = c("idős", "fiatal_tulaj", "fiatal_bérlő"))
+    category = factor(category, levels = c("idős", "fiatalabb tulajdonos", "fiatalabb bérlő"))
   )
 
 # Quick check
 table(interview_data$category)
-
-interview_data <- interview_data %>%
-  mutate(
-    category_A = case_when(
-      birth_year < 1965 ~ "idős",
-      housing_expenses_total > 100000 ~ "fiatal_prekár",
-      TRUE ~ "fiatal_stabil"
-    ),
-    category_A = factor(category_A, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
-  )
-
-table(interview_data$category_A)
-interview_data <- interview_data %>%
-  mutate(
-    category_B = case_when(
-      birth_year < 1965 ~ "idős",
-      housing_expenses_PP > 100000 ~ "fiatal_prekár",
-      TRUE ~ "fiatal_stabil"
-    ),
-    category_B = factor(category_B, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
-  )
-
-table(interview_data$category_B)
-interview_data <- interview_data %>%
-  mutate(
-    category_C = case_when(
-      birth_year < 1965 ~ "idős",
-      housing_overburden > 0.3 ~ "fiatal_prekár",
-      TRUE ~ "fiatal_stabil"
-    ),
-    category_C = factor(category_C, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
-  )
-
-table(interview_data$category_C)
+# 
+# interview_data <- interview_data %>%
+#   mutate(
+#     category_A = case_when(
+#       birth_year < 1965 ~ "idős",
+#       housing_expenses_total > 100000 ~ "fiatal_prekár",
+#       TRUE ~ "fiatal_stabil"
+#     ),
+#     category_A = factor(category_A, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
+#   )
+# 
+# table(interview_data$category_A)
+# interview_data <- interview_data %>%
+#   mutate(
+#     category_B = case_when(
+#       birth_year < 1965 ~ "idős",
+#       housing_expenses_PP > 100000 ~ "fiatal_prekár",
+#       TRUE ~ "fiatal_stabil"
+#     ),
+#     category_B = factor(category_B, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
+#   )
+# 
+# table(interview_data$category_B)
+# interview_data <- interview_data %>%
+#   mutate(
+#     category_C = case_when(
+#       birth_year < 1965 ~ "idős",
+#       housing_overburden > 0.3 ~ "fiatal_prekár",
+#       TRUE ~ "fiatal_stabil"
+#     ),
+#     category_C = factor(category_C, levels = c("idős", "fiatal_stabil", "fiatal_prekár"))
+#   )
+# 
+# table(interview_data$category_C)
 
 
 
@@ -178,8 +191,17 @@ interview_data$f_years_in_apartment_grp <- factor(
   )
 )
 
+interview_data$income_group <- cut(
+  interview_data$income_per_person,
+  breaks = c(-Inf, 200000, 350000, Inf),
+  labels = c("Low", "Middle", "High")
+)
+
 # --- Save the cleaned and processed interview_data ---
 save(interview_data, file = "interview_data.RData")
+
+
+
 
 
 # --- 3. Numeric Analysis ---
@@ -233,18 +255,62 @@ plot_numeric_vs <- function(x, y, color, title, palette = NULL) {
   print(p)
 }
 
+plot_numeric_vs <- function(x, y, color, title, palette = NULL) {
+  
+  # Extract variables
+  x_vals <- interview_data[[x]]
+  y_vals <- interview_data[[y]]*100
+  groups <- interview_data[[color]]
+  
+  # Handle colors
+  if (is.null(palette)) {
+    cols <- as.numeric(as.factor(groups))
+    palette_used <- rainbow(length(unique(groups)))
+  } else {
+    cols <- palette[as.factor(groups)]
+    palette_used <- palette
+  }
+  
+  # Set margins similar to your barplot
+  par(mar = c(5, 5, 6, 2))
+  
+  # Base scatter plot
+  plot(
+    x_vals, y_vals,
+    col = cols,
+    pch = 19,
+    cex = 1.5,
+    ylim= c(0, 100),
+    xlab = toupper("születési év"),
+    ylab = toupper("lakásköltség aránya a háztartás jövedelméből"),
+    main = toupper(title),
+    cex.main = 1.4,
+    xpd = TRUE
+  )
+  
+  # Legend
+  legend(
+    "topleft",
+    legend = toupper(levels(as.factor(groups))),
+    col = palette_used,
+    pch = 19,
+    xpd = TRUE
+  )
+}
+
+
 plot_numeric_vs("birth_year", "housing_expenses_total", "housing_type",
                 "Total Housing Expenses of Household vs Birth Year by Housing Type",
-                c("red", "blue", "green", "orange", "purple", "brown"))
+                c("#00AC57",  "#3A439A", "#DF7201", "#C896AC"))
 
 plot_numeric_vs("birth_year", "housing_overburden", "housing_type",
-                "Housing Overburden Rate vs Birth Year by Housing Type",
-                c("red", "blue", "green", "orange", "purple", "brown"))
+                "Lakásköltség-terheltség életkor és \nlakhatási jogcím szerint\n",
+                c("#C896AC",  "#00AC57","#3A439A", "#DF7201"))
 
 
 plot_numeric_vs("birth_year", "housing_expenses_PP", "housing_type",
                 "Housing Expenses per person vs Birth Year by Housing Type",
-                c("red", "blue", "green", "orange", "purple", "brown"))
+                c("#00AC57",  "#3A439A", "#DF7201", "#C896AC"))
 
 
 plot_numeric_vs("birth_year", "housing_expenses_total", "lakhatasi_szegeny",

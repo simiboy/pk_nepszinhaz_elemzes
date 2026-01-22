@@ -6,6 +6,8 @@ library(ggplot2)
 library(showtext)
 library(stringr)
 
+library(writexl)
+
 # Set as default font for base R plots
 font_add("InterItalic", "Inter-Italic.otf")  
 showtext_auto()
@@ -62,24 +64,105 @@ quotations <- quotations %>%
     by = c("document" = "id")
   )
 
-#1.5 Diagnostics: check whether all document ↔ id links matched correctly
+#1.5 diagnostics
 
+# Quotations whose document code does NOT exist in interview_data$id 
+# Ideally should return zero rows 
 
-# Quotations whose document code does NOT exist in interview_data$id
-# Ideally should return zero rows
-missing_in_interview <- quotations %>%
-  anti_join(interview_data, by = c("document" = "id")) %>%
-  distinct(document)
+missing_in_interview <- quotations %>% 
+  anti_join(interview_data, by = c("document" = "id")) %>% 
+  distinct(document) 
 
-missing_in_interview  # should be empty
+missing_in_interview # should be empty 
 
-# Interview IDs that never appear in the quotations dataset
-# Ideally should also return zero rows
-missing_in_quotations <- interview_data %>%
-  anti_join(quotations, by = c("id" = "document")) %>%
-  distinct(id)
+# Interview IDs that never appear in the quotations dataset 
+# Ideally should also return zero rows 
+missing_in_quotations <- interview_data %>% 
+  anti_join(quotations, by = c("id" = "document")) %>% 
+  distinct(id) 
 
-missing_in_quotations  # should be empty
+missing_in_quotations # should be empty 
+
+quotations$code[quotations$code == "Pápa tér"] <- "II. János Pál pápa tér" 
+quotations$code[quotations$code == "Kis zöldítések / torkollatok"] <- "Utcai zöldítések"
+
+#1.6 exporting code frequencies 
+
+quotations <- quotations %>%
+  mutate(code_col = paste(codegroup, code, sep = " - "))
+code_counts <- quotations %>%
+  count(document, code_col, name = "n")
+code_wide <- code_counts %>%
+  pivot_wider(
+    names_from = code_col,
+    values_from = n,
+    values_fill = 0
+  )
+final_df <- interview_data %>%
+  left_join(
+    code_wide,
+    by = c("id" = "document")
+  )
+
+#1.7 exporting code sentiment shares 
+
+quotations_sentiment <- quotations %>%
+  mutate(
+    sentiment = case_when(
+      code == "Pozitív" ~ "positive",
+      code == "Negatív" ~ "negative",
+      TRUE ~ NA_character_
+    )
+  )
+quotation_sentiment_map <- quotations_sentiment %>%
+  group_by(document, quotation) %>%
+  summarise(
+    sentiment = sentiment[!is.na(sentiment)][1],
+    .groups = "drop"
+  )
+quotations_for_sentiment <- quotations_sentiment %>%
+  filter(!code %in% c("Pozitív", "Negatív")) %>%
+  left_join(
+    quotation_sentiment_map,
+    by = c("document", "quotation")
+  ) %>%
+  mutate(code_col = paste(codegroup, code, sep = " - "))
+quotations_for_sentiment <- quotations_for_sentiment %>%
+  select(-sentiment.x) %>%
+  rename(sentiment = sentiment.y)
+sentiment_counts <- quotations_for_sentiment %>%
+  filter(sentiment %in% c("positive", "negative")) %>%
+  count(document, code_col, sentiment)
+sentiment_share <- sentiment_counts %>%
+  pivot_wider(
+    names_from = sentiment,
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  mutate(
+    sentiment_share = positive / (positive + negative)
+  ) %>%
+  select(document, code_col, sentiment_share)
+sentiment_wide <- sentiment_share %>%
+  pivot_wider(
+    names_from = code_col,
+    values_from = sentiment_share,
+    values_fill = NA
+  )
+final_df_sentiment <- interview_data %>%
+  left_join(
+    sentiment_wide,
+    by = c("id" = "document")
+  )
+
+# exporting
+write_xlsx(
+  list(
+    final_df = final_df,
+    final_df_sentiment = final_df_sentiment
+  ),
+  path = "final_outputs.xlsx"
+)
 
 
 # =======  ANALYSIS ==============
@@ -379,299 +462,389 @@ ggplot(results_vars, aes(x = group, y = code, fill = shade)) +
     panel.spacing = unit(0.4, "lines")
   )
 
+
+
 #============================================
-#3 Analysing based on citizen cateogries
+#2.4c -- same with lakhatási szegény and income group
 
-compute_code_sentiment <- function(data, my_code, my_category) {
-  
-  # Step 1: Filter initial df
-  df <- data %>%
-    filter(code == my_code,
-           category == my_category)
-  
-  # Step 2: Find matching rows with different code
-  df_pos_neg <- data %>%
-    filter(codegroup == "Pozitív / Negatív") %>%
-    select(-codegroup)  # Remove codegroup to avoid duplication if needed
-  
-  # Step 3: Join with original df via quotation and other columns except code
-  # Assuming 'quotation' is the unique connecting key
-  df <- df %>%
-    left_join(df_pos_neg %>% select(quotation, code), 
-              by = "quotation", 
-              suffix = c("", "_posneg"))
-  
-  df_summary <- df %>%
-    # Keep only rows that matched with Pos/Neg
-    filter(!is.na(code_posneg)) %>%
-    group_by(document) %>%
-    summarise(
-      total_posneg = n(),  # total rows in Pos/Neg for this document
-      nr_pos = sum(code_posneg == "Pozitív"),  # count of Pos codes
-      share_pos = nr_pos / total_posneg   # share of Pos
+
+quotations <- quotations %>%
+  mutate(
+    category          = as.character(category),
+    gender            = as.character(gender),
+    code              = as.character(code),
+    lakhatasi_szegeny = as.character(lakhatasi_szegeny),
+    income_group      = as.character(income_group)
+  )
+lakhatas_levels <- sort(unique(quotations$lakhatasi_szegeny))
+income_levels   <- c("Low", "Middle", "High")
+grid <- expand.grid(
+  code  = unique_codes,
+  group = c(lakhatas_levels, income_levels),
+  stringsAsFactors = FALSE
+)
+
+grid <- grid %>%
+  mutate(
+    group_type = ifelse(group %in% lakhatas_levels,
+                        "lakhatási szegény",
+                        "income group")
+  )
+
+results <- grid %>%
+  rowwise() %>%
+  mutate(temp = list(compute_sentiment(
+    quotations,
+    code_name   = code,
+    group_var   = ifelse(group_type == "lakhatási szegény",
+                         "lakhatasi_szegeny",
+                         "income_group"),
+    group_value = group
+  ))) %>%
+  unnest_wider(temp) %>%
+  ungroup() %>%
+  mutate(shade = share_pos)
+results <- results %>%
+  left_join(
+    quotations %>% distinct(code, codegroup),
+    by = "code"
+  ) %>%
+  arrange(codegroup, code) %>%
+  mutate(
+    code      = factor(code, levels = unique(code)),
+    codegroup = factor(codegroup)
+  )
+
+results <- results %>%
+  mutate(
+    group = if_else(
+      group_type == "income group",
+      factor(as.character(group), levels = c("Low", "Middle", "High")),
+      factor(as.character(group), levels = sort(unique(quotations$lakhatasi_szegeny)))
     )
-  print(df_summary)
-  share_positive <- mean(df_summary$share_pos, na.rm = T)
-  n_documents <- nrow(df_summary)
+  ) %>%
+  droplevels()
+
+
+ggplot(results, aes(x = group, y = code, fill = shade)) +
+  geom_tile(color = "white") +
   
-  return(list(
-    share_positive = share_positive,
-    n_documents = n_documents
-  ))
-}
+  geom_text(aes(label = N), size = 3, color = "#444") +
+  
+  facet_grid(
+    rows = vars(codegroup),
+    cols = vars(group_type),
+    scales = "free",
+    space  = "free"
+  ) +
+  
+  scale_fill_gradient2(
+    name     = "Share positive",
+    limits  = c(0, 1),
+    midpoint = 0.5,
+    low      = "#C38BA4",
+    mid      = "white",
+    high     = "#00AC57",
+    na.value = "grey90"
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    strip.text   = element_text(face = "bold", size = 12),
+    strip.background = element_rect(fill = "grey95", color = NA),
+    panel.spacing = unit(0.4, "lines")
+  )
 
 
+
+
+#============================================
+#3 Analysing based on clusters and genders
+
+# categories
 plot_code_sentiment_across_categories <- function(data, code_name, main_title) {
+  bar_colors <- c("#00AC57", "#3A439A")
   
   sentiment_summary <- lapply(categories, function(cat) {
-    df <- data %>% filter(code == code_name, category == cat)
-    results <- compute_code_sentiment(data, code_name, cat)
-    return(data.frame(category = cat, share_pos = results$share_positive, n = results$n_documents))
-  }) %>%
-    bind_rows()
-  
-  bp <- barplot(
-    sentiment_summary$share_pos,
-    names.arg = toupper(sentiment_summary$category),
-    col = "#00AC57",
-    border = "white",
-    ylim = c(0, 1),
-    main = toupper(paste("POZITÍV ÉRZELEM ARÁNYA\n", main_title)),
-    ylab = toupper("Pozitív arány"),
-    xlab = toupper("")
-  )
-  
-  # Allow drawing outside plot area
-  par(xpd = TRUE)
-  
-  # Add N labels below x-axis
-  text(
-    x = bp,
-    y = -0.18,
-    labels = toupper(paste0("N=", sentiment_summary$n)),
-    cex = 1,
-    col = "black"
-  )
-  
-  # Reset clipping
-  par(xpd = FALSE)
-}
-
-# Example usage
-compute_code_sentiment(quotations, "Biztonságérzet", "fiatal_bérlő")
-plot_code_sentiment_across_categories(quotations, "Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
-
-plot_code_sentiment_across_categories(quotations, "Általános jövőkép", "Általános jövőkép (Jövőkép az utcáról)")
-plot_code_sentiment_across_categories(quotations, "Társadalmi sokszínűség (etnikai / osztálybeli / más)", "Társadalmi sokszínűség \n(Utcával kapcsolatos attitűdök)"
-)
-plot_code_sentiment_across_categories(quotations, "Biztonságérzet", "Biztonságérzet \n(Utcával kapcsolatos attitűdök)"
-)
-plot_code_sentiment_across_categories(quotations, "Tisztaság / rendezettség", "Tisztaság / rendezettség \n(Utcával kapcsolatos attitűdök)"
-)
-
-
-#=========================================
-#3 Analysing based on gender
-#=========================================
-
-
-compute_code_sentiment_gender <- function(data, my_code, my_gender) {
-  
-  # Step 1: Filter initial df
-  df <- data %>%
-    filter(code == my_code,
-           gender == my_gender)
-  
-  # Step 2: Find matching rows with different code
-  df_pos_neg <- data %>%
-    filter(codegroup == "Pozitív / Negatív") %>%
-    select(-codegroup)
-  
-  # Step 3: Join with original df via quotation
-  df <- df %>%
-    left_join(df_pos_neg %>% select(quotation, code),
-              by = "quotation",
-              suffix = c("", "_posneg"))
-  
-  df_summary <- df %>%
-    filter(!is.na(code_posneg)) %>%
-    group_by(document) %>%
-    summarise(
-      total_posneg = n(),
-      nr_pos = sum(code_posneg == "Pozitív"),
-      share_pos = nr_pos / total_posneg
+    df <- data %>% filter(category == cat)
+    df <- df %>% filter(!is.na(.data[[code_name]]))
+    
+    pos_share <- mean(df[[code_name]], na.rm = TRUE)
+    neg_share <- 1 - pos_share
+    
+    data.frame(
+      label = toupper(cat),
+      pos   = pos_share,
+      neg   = neg_share,
+      n     = nrow(df)
     )
+  }) %>% bind_rows()
   
-  print(df_summary)
-  print(nrow(df_summary))
-  share_positive <- mean(df_summary$share_pos, na.rm = TRUE)
-  n_documents <- nrow(df_summary)
+  bar_matrix <- rbind(
+    Pozitív = sentiment_summary$pos * 100,
+    Negatív = sentiment_summary$neg * 100
+  )
+  colnames(bar_matrix) <- sentiment_summary$label
   
-  return(list(
-    share_positive = share_positive,
-    n_documents = n_documents
-  ))
+  old_par <- par(mar = c(4.5, 12, 4, 3))
+  bp <- barplot(
+    bar_matrix,
+    col = bar_colors,
+    border = "white",
+    xlim = c(0, 100),
+    horiz = TRUE,
+    names.arg = rep("", ncol(bar_matrix)),
+    main = toupper(main_title),
+    xlab = toupper("ÉRZELMEK ARÁNYA (%)"),
+    cex.main = 1.4
+  )
+  
+  text(
+    x = -5,
+    y = bp,
+    labels = colnames(bar_matrix),
+    adj = 1,
+    xpd = TRUE
+  )
+  
+  text(
+    x = 102,
+    y = bp,
+    labels = paste0("N=", sentiment_summary$n),
+    adj = 0,
+    xpd = TRUE
+  )
+  
+  legend(
+    "topleft",
+    inset = c(-0.5, -0.8),
+    legend = c("POZITÍV", "NEGATÍV"),
+    fill = bar_colors,
+    border = "grey40",
+    xpd = TRUE
+  )
+  
+  par(old_par)
 }
 
+# genders
 plot_code_sentiment_across_genders <- function(data, code_name, main_title) {
-  
-  genders <- unique(data$gender)
+  bar_colors <- c("#00AC57", "#3A439A")
+  # data <- final_df_sentiment
+  # code_name <- "Jövőkép az utcáról - Jövőkép az utcáról"
   
   sentiment_summary <- lapply(genders, function(g) {
-    df <- data %>% filter(code == code_name, gender == g, codegroup == "Pozitív / Negatív")
-    results <- compute_code_sentiment_gender(data, code_name, g)
-    n_rows <- df %>% nrow()
-    return(data.frame(gender = g, share_pos = results$share_positive, n = results$n_documents))
-  }) %>% bind_rows()
-  
-  bp <- barplot(
-    sentiment_summary$share_pos,
-    names.arg = toupper(sentiment_summary$gender),
-    col = "#C38BA4",
-    border = "white",
-    ylim = c(0, 1),
-    main = toupper(paste("POZITÍV ÉRZELEM ARÁNYA\n", main_title)),
-    ylab = toupper("Pozitív arány"),
-    xlab = toupper("")
-  )
-  
-  # Allow drawing outside plot area
-  par(xpd = TRUE)
-  
-  # Add N labels below x-axis
-  text(
-    x = bp,
-    y = -0.18,
-    labels = toupper(paste0("N=", sentiment_summary$n)),
-    cex = 1,
-    col = "black"
-  )
-  
-  # Reset clipping
-  par(xpd = FALSE)
-}
-
-
-# Example usage
-compute_code_sentiment_gender(quotations, "Általános jövőkép", "Férfi")
-plot_code_sentiment_across_genders(quotations, "Általános jövőkép", "Általános jövőkép (Jövőkép az utcáról)")
-
-plot_code_sentiment_across_genders(quotations, "Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
-plot_code_sentiment_across_genders(quotations, "Társadalmi sokszínűség (etnikai / osztálybeli / más)", "Társadalmi sokszínűség \n(Utcával kapcsolatos attitűdök)"
-)
-plot_code_sentiment_across_genders(quotations, "Biztonságérzet", "Biztonságérzet \n(Utcával kapcsolatos attitűdök)"
-)
-plot_code_sentiment_across_genders(quotations, "Tisztaság / rendezettség", "Tisztaság / rendezettség \n(Utcával kapcsolatos attitűdök)"
-)
-
-
-#=========================================
-# 4 Analysing based on elhelyezkedés
-#=========================================
-
-compute_code_sentiment_location <- function(data, my_code, my_location) {
-  
-  # Step 1: Filter initial df
-  df <- data %>%
-    filter(code == my_code,
-           elhelyezkedés == my_location)
-  
-  # Step 2: Find matching rows with different code
-  df_pos_neg <- data %>%
-    filter(codegroup == "Pozitív / Negatív") %>%
-    select(-codegroup)
-  
-  # Step 3: Join with original df via quotation
-  df <- df %>%
-    left_join(df_pos_neg %>% select(quotation, code),
-              by = "quotation",
-              suffix = c("", "_posneg"))
-  
-  df_summary <- df %>%
-    filter(!is.na(code_posneg)) %>%
-    group_by(document) %>%
-    summarise(
-      total_posneg = n(),
-      nr_pos = sum(code_posneg == "Pozitív"),
-      share_pos = nr_pos / total_posneg
+    # g <- "Férfi"
+    df <- data %>% filter(gender == g)
+    df <- df %>% filter(!is.na(.data[[code_name]]))
+    
+    pos_share <- mean(df[[code_name]], na.rm = TRUE)
+    neg_share <- 1 - pos_share
+    
+    data.frame(
+      label = toupper(g),
+      pos   = pos_share,
+      neg   = neg_share,
+      n     = nrow(df)
     )
-  
-  print(df_summary)
-  share_positive <- mean(df_summary$share_pos, na.rm = TRUE)
-  return(share_positive)
-}
-
-plot_code_sentiment_across_locations <- function(data, code_name, main_title) {
-  
-  locations <- levels(data$elhelyezkedés)
-  
-  sentiment_summary <- lapply(locations, function(loc) {
-    df <- data %>% filter(code == code_name, elhelyezkedés == loc)
-    share_pos <- compute_code_sentiment_location(data, code_name, loc)
-    n_rows <- nrow(df)
-    return(data.frame(elhelyezkedés = loc, share_pos = share_pos, n = n_rows))
   }) %>% bind_rows()
   
-  old_par <- par(mar = c(14, 4, 4, 2))
+  bar_matrix <- rbind(
+    Pozitív = sentiment_summary$pos * 100,
+    Negatív = sentiment_summary$neg * 100
+  )
+  colnames(bar_matrix) <- sentiment_summary$label
   
-  bar_centers <- barplot(
-    sentiment_summary$share_pos,
-    names.arg = FALSE,
-    col = "#3A439A",
+  old_par <- par(mar = c(4.5, 12, 4, 3))
+  bp <- barplot(
+    bar_matrix,
+    col = bar_colors,
     border = "white",
-    ylim = c(0, 1),
-    main = toupper(paste("POZITÍV ÉRZELEM ARÁNYA\n", main_title)),
-    ylab = toupper("Pozitív arány"),
-    xlab = ""
+    xlim = c(0, 100),
+    horiz = TRUE,
+    names.arg = rep("", ncol(bar_matrix)),
+    main = toupper(main_title),
+    xlab = toupper("ÉRZELMEK ARÁNYA (%)"),
+    cex.main = 1.4
   )
   
   text(
-    x = bar_centers,
-    y = par("usr")[3] - 0.02,
-    labels = toupper(sentiment_summary$elhelyezkedés),
-    srt = 45,
-    xpd = TRUE,
+    x = -5,
+    y = bp,
+    labels = colnames(bar_matrix),
     adj = 1,
-    cex = 0.9
+    xpd = TRUE
   )
   
   text(
-    x = bar_centers,
-    y = sentiment_summary$share_pos,
-    labels = toupper(paste0("N=", sentiment_summary$n)),
-    pos = 1,
-    cex = 1,
-    col = "black"
+    x = 102,
+    y = bp,
+    labels = paste0("N=", sentiment_summary$n),
+    adj = 0,
+    xpd = TRUE
+  )
+  
+  legend(
+    "topleft",
+    inset = c(-0.5, -1.3),
+    legend = c("POZITÍV", "NEGATÍV"),
+    fill = bar_colors,
+    border = "grey40",
+    xpd = TRUE
   )
   
   par(old_par)
 }
 
 
-# Example usage:
-plot_code_sentiment_across_locations(quotations, "Teleki tér", "Teleki tér")
-
-# Loop through each code and inspect the plot
-for (i in 1:nrow(unique_codes)) {
-  code_name <- unique_codes$code[i]
-  code_group <- unique_codes$codegroup[i]
+# categories & genders
+plot_code_sentiment_categories_and_genders <- function(data, code_name, main_title) {
   
-  if (!is.na(code_name)) {
+  bar_colors <- c("#00AC57", "#3A439A")
+  
+  ## -------- categories --------
+  sentiment_cat <- lapply(categories, function(cat) {
     
-    # Plot with code group in parentheses
-    plot_code_sentiment_across_locations(quotations, code_name, 
-                                          main_title = paste0(code_name, " (", code_group, ")"))
+    # Filter for the category
+    df <- data %>% filter(category == cat)
     
-    # Wait for user input with option to quit
-    user_input <- readline(prompt = paste("Press [Enter] to continue to the next code, or type 'q' to quit:", 
-                                          code_name, "(", code_group, ")"))
-    if (tolower(user_input) == "q") {
-      cat("Quitting the loop.\n")
-      break
-    }
-  }
+    # Get the sentiment share column for this code
+    code_col <- code_name
+    
+    # Take only documents that have this code
+    df <- df %>% filter(!is.na(.data[[code_col]]))
+    
+    # Calculate average sentiment share per category
+    pos_share <- mean(df[[code_col]], na.rm = TRUE)
+    neg_share <- 1 - pos_share
+    
+    data.frame(
+      label = toupper(cat),
+      pos   = pos_share,
+      neg   = neg_share,
+      n     = nrow(df)
+    )
+  }) %>% bind_rows()
+  
+  ## -------- genders --------
+  genders <- unique(data$gender)
+  
+  sentiment_gen <- lapply(genders, function(g) {
+    
+    # Filter for the gender
+    df <- data %>% filter(gender == g)
+    
+    # Get the sentiment share column for this code
+    code_col <- code_name
+    
+    # Take only documents that have this code
+    df <- df %>% filter(!is.na(.data[[code_col]]))
+    
+    # Calculate average sentiment share per gender
+    pos_share <- mean(df[[code_col]], na.rm = TRUE)
+    neg_share <- 1 - pos_share
+    
+    data.frame(
+      label = toupper(g),
+      pos   = pos_share,
+      neg   = neg_share,
+      n     = nrow(df)
+    )
+  }) %>% bind_rows()
+  
+  ## -------- combine with spacer --------
+  combined <- bind_rows(
+    sentiment_gen,
+    data.frame(label = "", pos = NA, neg = NA, n = NA),  # spacer
+    sentiment_cat
+  )
+  
+  bar_matrix <- rbind(
+    Pozitív = combined$pos * 100,
+    Negatív = combined$neg * 100
+  )
+  
+  colnames(bar_matrix) <- combined$label
+  
+  ## -------- plot --------
+  old_par <- par(mar = c(4.5, 12, 4, 3))
+  bp <- barplot(
+    bar_matrix,
+    col = bar_colors,
+    border = "white",
+    xlim = c(0, 100),
+    horiz = TRUE,
+    space = c(rep(0.2, nrow(sentiment_gen)),
+              -0.5,
+              rep(0.2, nrow(sentiment_cat))),
+    names.arg = rep("", ncol(bar_matrix)),
+    main = toupper(main_title),
+    xlab = toupper("ÉRZELMEK ARÁNYA (%)"),
+    cex.main = 1.4
+  )
+  
+  ## y labels
+  text(
+    x = -5,
+    y = bp,
+    labels = combined$label,
+    adj = 1,
+    xpd = TRUE
+  )
+  
+  ## N labels
+  text(
+    x = 102,
+    y = bp,
+    labels = ifelse(is.na(combined$n), "", paste0("N=", combined$n)),
+    adj = 0,
+    xpd = TRUE
+  )
+  
+  legend(
+    "topleft",
+    inset = c(-0.5, -0.4),
+    legend = c("POZITÍV", "NEGATÍV"),
+    fill = bar_colors,
+    border = "grey40",
+    xpd = TRUE
+  )
+  
+  par(old_par)
 }
 
+
+
+#-----------------------
+# calculate for groups
+
+plot_code_sentiment_across_categories(final_df_sentiment, "Utcával kapcsolatos attitűdök - Társadalmi sokszínűség (etnikai / osztálybeli / más)", "Társadalmi sokszínűség \n(Utcával kapcsolatos attitűdök)")
+plot_code_sentiment_across_categories(final_df_sentiment, "Utcával kapcsolatos attitűdök - Biztonságérzet", "Biztonságérzet \n(Utcával kapcsolatos attitűdök)")
+plot_code_sentiment_across_categories(final_df_sentiment, "Utcával kapcsolatos attitűdök - Tisztaság / rendezettség", "Tisztaság / rendezettség \n(Utcával kapcsolatos attitűdök)")
+plot_code_sentiment_across_categories(final_df_sentiment, "Jövőkép az utcáról - Jövőkép az utcáról", "Általános jövőkép az utcáról")
+plot_code_sentiment_across_categories(final_df_sentiment,  "Utca változásai - Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
+plot_code_sentiment_across_categories(final_df_sentiment, "Utcával kapcsolatos attitűdök - Környezeti benyomások (zaj / szmog / más)", "Környezeti benyomások\n(Utcával kapcsolatos attitűdök)")
+
+plot_code_sentiment_across_genders(final_df_sentiment, "Utcával kapcsolatos attitűdök - Társadalmi sokszínűség (etnikai / osztálybeli / más)", "Társadalmi sokszínűség \n(Utcával kapcsolatos attitűdök)")
+plot_code_sentiment_across_genders(final_df_sentiment, "Utcával kapcsolatos attitűdök - Biztonságérzet", "Biztonságérzet \n(Utcával kapcsolatos attitűdök)")
+plot_code_sentiment_across_genders(final_df_sentiment, "Utcával kapcsolatos attitűdök - Tisztaság / rendezettség", "Tisztaság / rendezettség \n(Utcával kapcsolatos attitűdök)")
+plot_code_sentiment_across_genders(final_df_sentiment, "Jövőkép az utcáról - Jövőkép az utcáról", "Általános jövőkép az utcáról")
+plot_code_sentiment_across_genders(final_df_sentiment,  "Utca változásai - Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
+plot_code_sentiment_across_genders(final_df_sentiment, "Utcával kapcsolatos attitűdök - Környezeti benyomások (zaj / szmog / más)", "Környezeti benyomások\n(Utcával kapcsolatos attitűdök)")
+
+plot_code_sentiment_categories_and_genders(final_df_sentiment, "Utcával kapcsolatos attitűdök - Társadalmi sokszínűség (etnikai / osztálybeli / más)", "Társadalmi sokszínűség \n(Utcával kapcsolatos attitűdök)")
+plot_code_sentiment_categories_and_genders(final_df_sentiment, "Utcával kapcsolatos attitűdök - Biztonságérzet", "Biztonságérzet \n(Utcával kapcsolatos attitűdök)")
+plot_code_sentiment_categories_and_genders(final_df_sentiment, "Utcával kapcsolatos attitűdök - Tisztaság / rendezettség", "Tisztaság / rendezettség \n(Utcával kapcsolatos attitűdök)")
+plot_code_sentiment_categories_and_genders(final_df_sentiment, "Jövőkép az utcáról - Jövőkép az utcáról", "Általános jövőkép az utcáról")
+plot_code_sentiment_categories_and_genders(final_df_sentiment,  "Utca változásai - Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
+plot_code_sentiment_categories_and_genders(final_df_sentiment, "Utcával kapcsolatos attitűdök - Környezeti benyomások (zaj / szmog / más)", "Környezeti benyomások\n(Utcával kapcsolatos attitűdök)")
+
+
+plot_code_sentiment_categories_and_genders(final_df_sentiment,  "Utca változásai - Közbiztonság és közterületi viselkedés", "Közbiztonság és közterületi viselkedés\n(Utca változásai)")
+plot_code_sentiment_categories_and_genders(final_df_sentiment,  "Utca változásai - Fizikai környezet és utcakép változásai", "Fizikai környezet és utcakép változásai\n(Utca változásai)")
+plot_code_sentiment_categories_and_genders(final_df_sentiment,  "Utca változásai - Lakossági összetétel / közösségek", "Lakossági összetétel / közösségek\n(Utca változásai)")
+plot_code_sentiment_categories_and_genders(final_df_sentiment,  "Utca változásai - Üzletek / szolgáltatások / vendéglátás", "Üzletek / szolgáltatások / vendéglátás\n(Utca változásai)")
 
 
 
@@ -681,8 +854,8 @@ for (i in 1:nrow(unique_codes)) {
 compute_codegroup_sentiment <- function(data, my_codegroup, my_category) {
   
   # data <- quotations
-  # my_codegroup <- "Utca változásai"
-  # my_category <- "fiatal_bérlő"
+  # my_codegroup <- "Jövőkép a társasházról"
+  # my_category <- "fiatal bérlő"
   
   # Step 1: Filter data for the codegroup and category
   df <- data %>%
@@ -699,16 +872,17 @@ compute_codegroup_sentiment <- function(data, my_codegroup, my_category) {
   # Step 3: Join with Pos/Neg via quotation
   df <- df %>%
     left_join(df_pos_neg, by = "quotation", suffix = c("", "_posneg"), relationship = "many-to-many")
-  
   # Step 4: Summarize per document
+  
   df_summary <- df %>%
-    filter(!is.na(code)) %>%  # keep only rows that have Pos/Neg codes
+    filter(!is.na(code) & !is.na(code_posneg)) %>%  # keep only rows that have Pos/Neg codes
     group_by(document) %>%
     summarise(
       total_posneg = sum(code_posneg == "Pozitív" | code_posneg == "Negatív", na.rm = T),
       nr_pos = sum(code_posneg == "Pozitív", na.rm = T),
       share_pos = nr_pos / total_posneg
     )
+  print(df_summary)
   
   share_positive <- mean(df_summary$share_pos, na.rm = TRUE)
   n_documents <- nrow(df_summary)
@@ -719,47 +893,79 @@ compute_codegroup_sentiment <- function(data, my_codegroup, my_category) {
   ))
 }
 
+# Example usage
+compute_codegroup_sentiment(quotations, "Jövőkép a társasházról", "fiatal tulajdonos")
 
 plot_codegroup_sentiment_across_categories <- function(data, codegroup_name, main_title) {
   
+  # Step 1: Compute sentiment per category
   sentiment_summary <- lapply(categories, function(cat) {
     results <- compute_codegroup_sentiment(data, codegroup_name, cat)
-    data.frame(category = cat, share_pos = results$share_positive, n = results$n_documents)
-  }) %>%
-    bind_rows()
+    data.frame(
+      category = cat,
+      share_pos = results$share_positive,
+      share_neg = 1 - results$share_positive,  # Compute negative share
+      n = results$n_documents
+    )
+  }) %>% bind_rows()
   
+  # Step 2: Matrix for horizontal stacked barplot
+  bar_matrix <- rbind(
+    Pozitív = sentiment_summary$share_pos * 100,
+    Negatív = sentiment_summary$share_neg * 100
+  )
+  colnames(bar_matrix) <- toupper(sentiment_summary$category)
+  
+  bar_colors <- c("#00AC57", "#3A439A")
+  
+  # Step 3: Adjust margins for category labels
+  old_par <- par(mar = c(4.5, 12, 4, 3))
+  
+  # Step 4: Horizontal stacked barplot
   bp <- barplot(
-    sentiment_summary$share_pos,
-    names.arg = toupper(sentiment_summary$category),
-    col = "#00AC57",
+    bar_matrix,
+    col = bar_colors,
     border = "white",
-    ylim = c(0, 1),
-    main = toupper(paste("POZITÍV ÉRZELEM ARÁNYA\n", main_title)),
-    ylab = toupper("Pozitív arány"),
-    xlab = toupper("")
+    xlim = c(0, 100),
+    names.arg = rep("", ncol(bar_matrix)),
+    main = toupper(main_title),
+    xlab = toupper("ÉRZELMEK ARÁNYA (%)"),
+    horiz = TRUE,
+    cex.main = 1.4
   )
   
-  # Allow drawing outside plot area
-  par(xpd = TRUE)
-  
-  # Add N labels below x-axis
+  # Step 5: Add category labels on the y-axis
   text(
-    x = bp,
-    y = -0.18,
-    labels = toupper(paste0("N=", sentiment_summary$n)),
-    cex = 1,
-    col = "black"
+    x = -5,
+    y = bp,
+    labels = colnames(bar_matrix),
+    adj = 1,
+    xpd = TRUE
   )
   
-  # Reset clipping
-  par(xpd = FALSE)
+  # Step 6: Add N labels to the right of bars
+  text(
+    x = 102,
+    y = bp,
+    labels = toupper(paste0("N=", sentiment_summary$n)),
+    adj = 0,
+    xpd = TRUE,
+    cex = 1
+  )
+  
+  # Step 7: Legend
+  legend(
+    "topleft",
+    inset = c(-0.5, -0.65),
+    legend = c("POZITÍV", "NEGATÍV"),
+    fill = bar_colors,
+    border = "grey40",
+    xpd = TRUE
+  )
+  
+  par(old_par)
 }
 
-par(mar = c(4, 4, 4, 2))
-# Example usage
-compute_codegroup_sentiment(quotations, "Utca változásai", "fiatal_bérlő")
-plot_codegroup_sentiment_across_categories(quotations, "Utca változásai", "Utca változásai")
-plot_codegroup_sentiment_across_categories(quotations, "Utcai fejlesztések értékelése", "Utcai fejlesztések értékelése")
 
 
 #================================================
@@ -785,7 +991,7 @@ compute_codegroup_sentiment_gender <- function(data, my_codegroup, my_gender) {
   
   # Step 4: Summarize per document
   df_summary <- df %>%
-    filter(!is.na(code_posneg)) %>%  # keep only rows that have Pos/Neg codes
+    filter(!is.na(code_posneg) & !is.na(code_posneg)) %>%  # keep only rows that have Pos/Neg codes
     group_by(document) %>%
     summarise(
       total_posneg = sum(code_posneg %in% c("Pozitív", "Negatív"), na.rm = TRUE),
@@ -793,6 +999,8 @@ compute_codegroup_sentiment_gender <- function(data, my_codegroup, my_gender) {
       share_pos = nr_pos / total_posneg,
       .groups = "drop"
     )
+  
+  print(df_summary)
   
   share_positive <- mean(df_summary$share_pos, na.rm = TRUE)
   n_documents <- nrow(df_summary)
@@ -803,52 +1011,94 @@ compute_codegroup_sentiment_gender <- function(data, my_codegroup, my_gender) {
   ))
 }
 
+#compute_codegroup_sentiment_gender(quotations, "Jövőkép a társasházról", "Nő")
+
+
+
 
 plot_codegroup_sentiment_across_genders <- function(data, codegroup_name, main_title) {
   
   genders <- unique(data$gender)
   
+  # Step 1: Compute sentiment per gender
   sentiment_summary <- lapply(genders, function(g) {
     results <- compute_codegroup_sentiment_gender(data, codegroup_name, g)
-    data.frame(gender = g, share_pos = results$share_positive, n = results$n_documents)
-  }) %>%
-    bind_rows()
+    data.frame(
+      gender = g,
+      share_pos = results$share_positive,
+      share_neg = 1 - results$share_positive,  # Compute negative share
+      n = results$n_documents
+    )
+  }) %>% bind_rows()
   
+  # Step 2: Matrix for horizontal stacked barplot
+  bar_matrix <- rbind(
+    Pozitív = sentiment_summary$share_pos * 100,
+    Negatív = sentiment_summary$share_neg * 100
+  )
+  colnames(bar_matrix) <- toupper(sentiment_summary$gender)
+  
+  bar_colors <- c("#00AC57", "#3A439A")  # same colors as categories plot
+  
+  # Step 3: Adjust margins for labels
+  old_par <- par(mar = c(4.5, 12, 4, 3))
+  
+  # Step 4: Horizontal stacked barplot
   bp <- barplot(
-    sentiment_summary$share_pos,
-    names.arg = toupper(sentiment_summary$gender),
-    col = "#C38BA4",
+    bar_matrix,
+    col = bar_colors,
     border = "white",
-    ylim = c(0, 1),
-    main = toupper(paste("POZITÍV ÉRZELEM ARÁNYA\n", main_title)),
-    ylab = toupper("Pozitív arány"),
-    xlab = toupper("")
+    xlim = c(0, 100),
+    names.arg = rep("", ncol(bar_matrix)),
+    main = toupper(main_title),
+    xlab = toupper("ÉRZELMEK ARÁNYA (%)"),
+    horiz = TRUE,
+    cex.main = 1.4
   )
   
-  # Allow drawing outside plot area
-  par(xpd = TRUE)
-  
-  # Add N labels below x-axis
+  # Step 5: Add gender labels on the y-axis
   text(
-    x = bp,
-    y = -0.18,
-    labels = toupper(paste0("N=", sentiment_summary$n)),
-    cex = 1,
-    col = "black"
+    x = -5,
+    y = bp,
+    labels = colnames(bar_matrix),
+    adj = 1,
+    xpd = TRUE
   )
   
-  # Reset clipping
-  par(xpd = FALSE)
+  # Step 6: Add N labels to the right of bars
+  text(
+    x = 102,
+    y = bp,
+    labels = toupper(paste0("N=", sentiment_summary$n)),
+    adj = 0,
+    xpd = TRUE,
+    cex = 1
+  )
+  
+  # Step 7: Legend
+  legend(
+    "topleft",
+    inset = c(-0.45, -0.9),
+    legend = c("POZITÍV", "NEGATÍV"),
+    fill = bar_colors,
+    border = "grey40",
+    xpd = TRUE
+  )
+  
+  par(old_par)
 }
 
-par(mar = c(4, 4, 4, 2))
 
-# Example usage
-compute_codegroup_sentiment_gender(quotations, "Utca változásai", "Nő")
+plot_codegroup_sentiment_across_categories(quotations, "Utca változásai", "Utca változásai")
+plot_codegroup_sentiment_across_categories(quotations, "Utcai fejlesztések értékelése", "Utcai fejlesztések értékelése")
+plot_codegroup_sentiment_across_categories(quotations, "Társasházak működése (jelenleg)", "Társasházak működése")
+plot_codegroup_sentiment_across_categories(quotations, "Jövőkép a társasházról", "Jövőkép a társasházról")
+
+
 plot_codegroup_sentiment_across_genders(quotations, "Utca változásai", "Utca változásai")
 plot_codegroup_sentiment_across_genders(quotations, "Utcai fejlesztések értékelése", "Utcai fejlesztések értékelése")
-
-
+plot_codegroup_sentiment_across_genders(quotations, "Társasházak működése (jelenleg)", "Társasházak működése")
+plot_codegroup_sentiment_across_genders(quotations, "Jövőkép a társasházról", "Jövőkép a társasházról")
 
 
 #====================================
@@ -856,9 +1106,9 @@ plot_codegroup_sentiment_across_genders(quotations, "Utcai fejlesztések érték
 plot_codegroup <- function(df, codegroup_name, group_var = "category") {
   
   # for debug
-  #df <- quotations
-  #codegroup_name <- "Utcahasználat (jelenleg)"
-  #group_var <- "category"
+  # df <- quotations
+  # codegroup_name <- "Utcahasználat (jelenleg)"
+  # group_var <- "category"
   
   unique_docs <- df[!duplicated(df$document), ]
   
@@ -877,16 +1127,21 @@ plot_codegroup <- function(df, codegroup_name, group_var = "category") {
     df_counts <- table(df_unique$code, df_unique[[group_var]])
     df_counts <- df_counts[, levels(df_unique[[group_var]]), drop = FALSE]  # enforce column order
     
+    total_per_code <- rowSums(df_counts)
+    df_counts <- df_counts[order(total_per_code, decreasing = TRUE), ]
+    
     group_totals <- table(unique_docs[[group_var]])
     df_counts <- sweep(df_counts, 2, group_totals, FUN = "/") * 100
 
+    
+    
     # Define colors
     groups <- colnames(df_counts)
     custom_colors <- c("#00AC57",  "#3A439A", "#DF7201", "#C896AC",  "#80D5AB", "#C896AC")
     colors <- setNames(custom_colors[1:length(groups)], groups)
     
     # Plot
-    par(mar = c(14, 5, 4, 2))
+    par(mar = c(14, 10, 4, 2))
     bp <- barplot(t(df_counts),
                   beside = TRUE,
                   col = colors,
@@ -900,12 +1155,12 @@ plot_codegroup <- function(df, codegroup_name, group_var = "category") {
     
     # Rotate x-axis labels
     text(x = colMeans(bp), 
-         y = par("usr")[3] - 0.05 * max(df_counts), 
+         y = par("usr")[3] - 0.1 * max(df_counts), 
          labels = toupper(sub("-.*", "", rownames(df_counts))),
          srt = 45, adj = 1, xpd = TRUE)
     
     # Add legend
-    legend("topleft", legend = toupper(groups), fill = colors, xpd = TRUE)
+    legend("topright", legend = toupper(groups), fill = colors, xpd = TRUE)
     
   } else {
     # No grouping variable, just counts per code
@@ -913,9 +1168,10 @@ plot_codegroup <- function(df, codegroup_name, group_var = "category") {
     df_counts <- table(df_unique$code)
     
     df_counts <- df_counts / nrow(unique_docs) * 100
+    df_counts <- df_counts[order(df_counts, decreasing = TRUE)]
     
     # Plot
-    par(mar = c(14, 5, 4, 2))
+    par(mar = c(14, 10, 4, 2))
     bp <- barplot(df_counts,
                   col = "#00AC57",
                   xlab = "",
@@ -926,7 +1182,7 @@ plot_codegroup <- function(df, codegroup_name, group_var = "category") {
     
     # Add x-axis labels rotated 45 degrees
     text(x = bp, 
-         y = par("usr")[3] - 0.05 * max(df_counts), 
+         y = par("usr")[3] - 0.1 * max(df_counts), 
          labels = toupper(sub("-.*", "", names(df_counts))),
          srt = 45, adj = 1, xpd = TRUE)
   }
@@ -1013,12 +1269,27 @@ plot_codegroup(quotations, "Ideköltözés okai és körülményei", group_var =
 plot_codegroup(quotations, "Ideköltözés okai és körülményei", group_var = "category")
 plot_codegroup(quotations, "Ideköltözés okai és körülményei", group_var = "gender")
 plot_codegroup_stacked(quotations, "Ideköltözés okai és körülményei", group_var = "f_years_in_apartment_grp")
+
 plot_codegroup(quotations, "Utcahasználat (jelenleg)", group_var = NA)
 plot_codegroup(quotations, "Utcahasználat (jelenleg)", group_var = "category")
 plot_codegroup(quotations, "Utcahasználat (jelenleg)", group_var = "gender")
+
 plot_codegroup(quotations, "Utcán mit változtatna", group_var = NA)
 plot_codegroup(quotations, "Utcán mit változtatna", group_var = "category")
 plot_codegroup(quotations, "Utcán mit változtatna", group_var = "gender")
+
+plot_codegroup(quotations, "Társasházak működése (jelenleg)", group_var = NA)
+plot_codegroup(quotations, "Társasházak működése (jelenleg)", group_var = "category")
+plot_codegroup(quotations, "Társasházak működése (jelenleg)", group_var = "gender")
+
+plot_codegroup(quotations, "Jövőkép a társasházról", group_var = NA)
+plot_codegroup(quotations, "Jövőkép a társasházról", group_var = "category")
+plot_codegroup(quotations, "Jövőkép a társasházról", group_var = "gender")
+
+
+plot_codegroup(quotations, "Utca változásai", group_var = NA)
+plot_codegroup(quotations, "Utca változásai", group_var = "category")
+plot_codegroup(quotations, "Utca változásai", group_var = "gender")
 
 
 
@@ -1068,6 +1339,7 @@ compute_code_sentiment_developments <- function(data, my_code, my_category) {
     n_documents = n_documents
   ))
 }
+
 plot_utcai_fejlesztesek_sentiment <- function(data) {
   
   # 1️⃣ Get all relevant codes (exclude "Nincs hatása" as before)
@@ -1095,84 +1367,331 @@ plot_utcai_fejlesztesek_sentiment <- function(data) {
     doc_shares <- df %>%
       mutate(
         doc_total = nr_pos + nr_neg + nr_nh,
-        doc_share_pos = nr_pos / doc_total,
-        doc_share_neg = nr_neg / doc_total,
-        doc_share_nh  = nr_nh  / doc_total
+        doc_share_pos = nr_pos / doc_total*100,
+        doc_share_neg = nr_neg / doc_total*100,
+        doc_share_nh  = nr_nh  / doc_total*100
       )
     
     tibble(
       code = cd,
       share_pos = mean(doc_shares$doc_share_pos, na.rm = TRUE),
-      share_neg = mean(doc_shares$doc_share_neg, na.rm = TRUE),
       share_nh  = mean(doc_shares$doc_share_nh,  na.rm = TRUE),
+      share_neg = mean(doc_shares$doc_share_neg, na.rm = TRUE),
       n_docs = nrow(doc_shares)
     )
   })
   
   sentiment_df <- bind_rows(sentiment_list)
-  
+  sentiment_df <- sentiment_df %>%
+    arrange(share_pos)
   # 3️⃣ Prepare bar matrix
   bar_matrix <- t(as.matrix(
     sentiment_df %>%
-      select(share_pos, share_neg, share_nh)
+      select(share_pos, share_nh, share_neg)
   ))
   
   colnames(bar_matrix) <- toupper(sentiment_df$code)
-  rownames(bar_matrix) <- c("POZITÍV", "NEGATÍV", "NINCS HATÁSA")
+  rownames(bar_matrix) <- c("POZITÍV", "NINCS HATÁSA", "NEGATÍV")
   
-  # 4️⃣ Set plotting parameters (extra space below)
-  op <- par(mar = c(10, 5, 4, 2))
+  
+  old_par <- par(mar = c(4.5, 11, 4, 4))
+  
   
   # 5️⃣ Plot stacked bars
   bp <- barplot(
     bar_matrix,
-    col = c("#00AC57", "#DF7201", "#9DA7A1"),
+    col = c("#00AC57", "#9DA7A1", "#3A439A"),
     border = "white",
-    ylim = c(0, 1),
     main = toupper("UTCai FEJLESZTÉSEK ÉRTÉKELÉSE"),
-    ylab = toupper("Arány"),
-    names.arg = rep("", length(codes)),
-    xlab = "",
-    las = 2
+    xlab = toupper("ÉRZELMEK ARÁNYA (%)"), 
+    horiz = TRUE,
+    names.arg = rep("", ncol(bar_matrix)),
+    xlim = c(0, 100),
+    ylab = "",
+    cex.main = 1.4
   )
   
-  # 6️⃣ Rotate code names 45°
-  text(
-    x = bp,
-    y = -0.02,
-    labels = colnames(bar_matrix),
-    srt = 45,
-    adj = 1,
-    xpd = TRUE,
-    cex = 0.9
-  )
+  text( x = -5, y = bp, labels = colnames(bar_matrix), adj = 1, xpd = TRUE )
   
   # 7️⃣ Add N labels below
   text(
-    x = bp,
-    y = 1.05,
+    y = bp,
+    x = 107,
     labels = paste0("N=", sentiment_df$n_docs),
-    cex = 0.9,
+    cex = 1,
     xpd = TRUE
   )
   
   # 8️⃣ Add legend
   legend(
-    x = 4, 
-    y = -0.4,
+    "topleft",
+    inset = c(-0.65, -0.4),
     legend = rownames(bar_matrix),
-    fill = c("#00AC57", "#DF7201", "#9DA7A1"),
-    bty = "n",
+    fill = c("#00AC57","#9DA7A1", "#3A439A"),
+    border = "grey40",
     xpd = TRUE
   )
-  
-  # 9️⃣ Reset plotting parameters
-  par(op)
+  par(old_par)
   
   # 10️⃣ Return document-weighted sentiment shares invisibly
   invisible(sentiment_df)
 }
 
-
-
 plot_utcai_fejlesztesek_sentiment(quotations)
+
+
+
+# by gender
+
+compute_gender_sentiment <- function(data, my_gender) {
+  
+  # Step 1: Filter by gender
+  df <- data %>%
+    filter(gender == my_gender)
+  
+  # Step 2: Find sentiment rows (Pos/Neg/No effect)
+  df_pos_neg <- data %>%
+    filter(code %in% c("Pozitív", "Negatív", "Nincs hatása")) %>%
+    select(quotation, code)
+  
+  # Step 3: Join with original df via 'quotation'
+  df <- df %>%
+    left_join(df_pos_neg, by = "quotation", suffix = c("", "_posneg"))
+  # Step 4: Summarise per document
+  df_summary <- df %>%
+    filter(codegroup == "Utcai fejlesztések értékelése" &
+             code != "Nincs hatása") %>%
+    filter(!is.na(code)) %>%
+    group_by(document) %>%
+    summarise(
+      total_posneg = n(),
+      nr_pos = sum(code_posneg == "Pozitív"),
+      nr_neg = sum(code_posneg == "Negatív"),
+      nr_nh  = sum(code_posneg == "Nincs hatása")
+    )
+  print(df_summary)
+  n_documents <- nrow(df_summary)
+  
+  return(list(
+    summary = df_summary,
+    n_documents = n_documents
+  ))
+}
+
+plot_gender_sentiment <- function(data) {
+  
+  # 1️⃣ Get all genders
+  genders <- data %>%
+    distinct(gender) %>%
+    pull(gender)
+  
+  # 2️⃣ Compute document-level sentiment shares
+  sentiment_list <- lapply(genders, function(g) {
+    
+    res <- compute_gender_sentiment(data, my_gender = g)
+    df <- res$summary
+    
+    if(nrow(df) == 0) return(NULL)
+    
+    doc_shares <- df %>%
+      mutate(
+        doc_total = nr_pos + nr_neg + nr_nh,
+        doc_share_pos = nr_pos / doc_total * 100,
+        doc_share_neg = nr_neg / doc_total * 100,
+        doc_share_nh  = nr_nh / doc_total * 100
+      )
+    
+    tibble(
+      gender = g,
+      share_pos = mean(doc_shares$doc_share_pos, na.rm = TRUE),
+      share_nh  = mean(doc_shares$doc_share_nh,  na.rm = TRUE),
+      share_neg = mean(doc_shares$doc_share_neg, na.rm = TRUE),
+      n_docs = nrow(doc_shares)
+    )
+  })
+  
+  sentiment_df <- bind_rows(sentiment_list) %>%
+    arrange(desc(share_pos))
+  
+  # 3️⃣ Prepare bar matrix
+  bar_matrix <- t(as.matrix(sentiment_df %>%
+                              select(share_pos, share_nh, share_neg)))
+  
+  colnames(bar_matrix) <- sentiment_df$gender
+  rownames(bar_matrix) <- c("POZITÍV", "NINCS HATÁSA", "NEGATÍV")
+  
+  print(bar_matrix)
+  
+  old_par <- par(mar = c(4.5, 12, 4, 4))
+  
+  # 4️⃣ Plot stacked bars
+  bp <- barplot(
+    bar_matrix,
+    col = c("#00AC57", "#9DA7A1", "#3A439A"),
+    border = "white",
+    main = toupper("UTCai FEJLESZTÉSEK ÉRTÉKELÉSE"),
+    xlab = toupper("ÉRZELMEK ARÁNYA (%)"), 
+    horiz = TRUE,
+    names.arg = rep("", ncol(bar_matrix)),
+    xlim = c(0, 100),
+    ylab = "",
+    cex.main = 1.4
+  )
+  
+  text(x = -5, y = bp, labels = toupper(colnames(bar_matrix)), adj = 1, xpd = TRUE)
+  
+  # 5️⃣ Add N labels
+  text(
+    y = bp,
+    x = 107,
+    labels = paste0("N=", sentiment_df$n_docs),
+    cex = 1,
+    xpd = TRUE
+  )
+  
+  # 6️⃣ Add legend
+  legend(
+    "topleft",
+    inset = c(-0.45, -0.95),
+    legend = rownames(bar_matrix),
+    fill = c("#00AC57", "#9DA7A1", "#3A439A"),
+    border = "grey40",
+    xpd = TRUE
+  )
+  
+  par(old_par)
+  
+  invisible(sentiment_df)
+}
+
+plot_gender_sentiment(quotations)
+
+
+
+# by category
+
+compute_category_sentiment <- function(data, my_category) {
+  
+  # Step 1: Filter by category
+  df <- data
+  if(!is.na(my_category)) {
+    df <- df %>% filter(category == my_category)
+  }
+  
+  # Step 2: Find sentiment rows (Pozitív / Negatív / Nincs hatása)
+  df_pos_neg <- data %>%
+    filter(code %in% c("Pozitív", "Negatív", "Nincs hatása")) %>%
+    select(quotation, code)
+  
+  # Step 3: Join with original df via 'quotation'
+  df <- df %>%
+    left_join(df_pos_neg, by = "quotation", suffix = c("", "_posneg"))
+  
+  # Step 4: Summarise per document
+  df_summary <- df %>%
+    filter(codegroup == "Utcai fejlesztések értékelése" &
+             code != "Nincs hatása") %>%
+    filter(!is.na(code)) %>%
+    group_by(document) %>%
+    summarise(
+      total_posneg = n(),
+      nr_pos = sum(code_posneg == "Pozitív"),
+      nr_neg = sum(code_posneg == "Negatív"),
+      nr_nh  = sum(code_posneg == "Nincs hatása")
+    )
+  
+  n_documents <- nrow(df_summary)
+  
+  return(list(
+    summary = df_summary,
+    n_documents = n_documents
+  ))
+}
+
+plot_category_sentiment <- function(data) {
+  
+  # 1️⃣ Get all categories
+  categories <- data %>%
+    distinct(category) %>%
+    pull(category)
+  
+  # 2️⃣ Compute document-level sentiment shares
+  sentiment_list <- lapply(categories, function(cat) {
+    
+    res <- compute_category_sentiment(data, my_category = cat)
+    df <- res$summary
+    
+    if(nrow(df) == 0) return(NULL)
+    
+    doc_shares <- df %>%
+      mutate(
+        doc_total = nr_pos + nr_neg + nr_nh,
+        doc_share_pos = nr_pos / doc_total * 100,
+        doc_share_neg = nr_neg / doc_total * 100,
+        doc_share_nh  = nr_nh / doc_total * 100
+      )
+    
+    tibble(
+      category = cat,
+      share_pos = mean(doc_shares$doc_share_pos, na.rm = TRUE),
+      share_nh  = mean(doc_shares$doc_share_nh,  na.rm = TRUE),
+      share_neg = mean(doc_shares$doc_share_neg, na.rm = TRUE),
+      n_docs = nrow(doc_shares)
+    )
+  })
+  
+  sentiment_df <- bind_rows(sentiment_list) %>%
+    arrange(desc(share_pos))
+  
+  # 3️⃣ Prepare bar matrix
+  bar_matrix <- t(as.matrix(sentiment_df %>%
+                              select(share_pos, share_nh, share_neg)))
+  
+  colnames(bar_matrix) <- sentiment_df$category
+  rownames(bar_matrix) <- c("POZITÍV", "NINCS HATÁSA", "NEGATÍV")
+  
+  old_par <- par(mar = c(4.5, 12, 4, 4))
+  
+  # 4️⃣ Plot stacked bars
+  bp <- barplot(
+    bar_matrix,
+    col = c("#00AC57", "#9DA7A1", "#3A439A"),
+    border = "white",
+    main = toupper("UTCai FEJLESZTÉSEK ÉRTÉKELÉSE"),
+    xlab = toupper("ÉRZELMEK ARÁNYA (%)"), 
+    horiz = TRUE,
+    names.arg = rep("", ncol(bar_matrix)),
+    xlim = c(0, 100),
+    ylab = "",
+    cex.main = 1.4
+  )
+  
+  text(x = -5, y = bp, labels = toupper(colnames(bar_matrix)), adj = 1, xpd = TRUE)
+  
+  # 5️⃣ Add N labels
+  text(
+    y = bp,
+    x = 107,
+    labels = paste0("N=", sentiment_df$n_docs),
+    cex = 1,
+    xpd = TRUE
+  )
+  
+  # 6️⃣ Add legend
+  legend(
+    "topleft",
+    inset = c(-0.45, -0.63),
+    legend = rownames(bar_matrix),
+    fill = c("#00AC57", "#9DA7A1", "#3A439A"),
+    border = "grey40",
+    xpd = TRUE
+  )
+  
+  par(old_par)
+  
+  invisible(sentiment_df)
+}
+
+# Example usage:
+plot_category_sentiment(quotations)
+
